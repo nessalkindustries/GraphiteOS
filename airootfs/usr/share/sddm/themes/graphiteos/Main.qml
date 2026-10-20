@@ -1,6 +1,5 @@
-import QtQuick 2.15
-import QtQuick.Controls 2.15
-import SddmComponents 2.0
+import QtQuick
+import QtQuick.Controls
 Rectangle {
     width: 1920; height: 1080; color: "#1c1d20"
     Image { anchors.fill: parent; source: "/usr/share/backgrounds/graphiteos/graphite.png"; fillMode: Image.PreserveAspectCrop }

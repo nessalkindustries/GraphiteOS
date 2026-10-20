@@ -19,8 +19,10 @@ fi
 
 PROFILE=$PWD
 if [ "$NVIDIA" = 1 ]; then
-  PROFILE=$(mktemp -d); cp -r . "$PROFILE"; rm -rf "$PROFILE/out"
+  PROFILE=$(mktemp -d); tar --exclude=./out --exclude=./.git -cf - . | tar -xf - -C "$PROFILE"
   grep -v '^#' packages.nvidia.x86_64 >> "$PROFILE/packages.x86_64"
+  # distinct ISO name so the NVIDIA build never overwrites the standard ISO
+  sed -i 's/^iso_name=.*/iso_name="graphiteos-nvidia"/' "$PROFILE/profiledef.sh"
 fi
 [ "$(id -u)" = 0 ] || exec sudo -E "$0" "$@"
 rm -rf "$WORK"

@@ -131,6 +131,7 @@ zsh
 # ---- GraphiteOS: desktop (Hyprland) ----
 hyprland
 hyprpaper
+swaybg
 hyprlock
 hypridle
 xdg-desktop-portal-hyprland
