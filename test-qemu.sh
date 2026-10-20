@@ -12,11 +12,12 @@ if [ "$MODE" = uefi ]; then
   cp "$VARS" out/ovmf_vars.fd
   FW=(-drive if=pflash,format=raw,readonly=on,file="$CODE" -drive if=pflash,format=raw,file=out/ovmf_vars.fd)
 fi
-ACCEL=(); [ -w /dev/kvm ] && ACCEL=(-enable-kvm -cpu host)
+# KVM is opt-in (USE_KVM=1); nested KVM on some hosts hangs silently
+ACCEL=(-accel tcg,thread=multi -cpu max); [ "${USE_KVM:-0}" = 1 ] && ACCEL=(-enable-kvm -cpu host)
 timeout "$SECS" qemu-system-x86_64 "${ACCEL[@]}" -m 4096 -smp 4 "${FW[@]}" \
-  -cdrom "$ISO" -boot d -display none -vga virtio -serial file:"$LOG" \
-  -monitor unix:out/mon-$MODE.sock,server,nowait -nic user,model=virtio-net-pci &
+  -cdrom "$ISO" -boot d -display none -vga std -serial stdio \
+  -monitor unix:out/mon-$MODE.sock,server,nowait -nic user,model=virtio-net-pci < /dev/null > "$LOG" 2>&1 &
 PID=$!
-sleep $((SECS-15)); echo "screendump out/screen-$MODE.ppm" | socat - UNIX-CONNECT:out/mon-$MODE.sock >/dev/null 2>&1 || true
+sleep $((SECS-15)); python3 -c "import socket,time;s=socket.socket(socket.AF_UNIX);s.connect('out/mon-$MODE.sock');s.send(b'screendump out/screen-$MODE.ppm\\n');time.sleep(2)" || true
 wait $PID
 grep -E "Reached target|login:|sddm|Welcome to" "$LOG" | tail -20
