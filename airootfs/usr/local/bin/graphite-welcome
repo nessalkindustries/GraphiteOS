@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# One-time welcome notification on the live session
+[ -f "$HOME/.cache/graphite-welcomed" ] && exit 0
+mkdir -p "$HOME/.cache"; touch "$HOME/.cache/graphite-welcomed"
+notify-send "Welcome to GraphiteOS" "SUPER+Enter: terminal · SUPER+D: apps · SUPER+G: game mode"

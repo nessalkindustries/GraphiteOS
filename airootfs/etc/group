@@ -1,0 +1,7 @@
+root:x:0:root
+wheel:x:998:graphite
+video:x:986:graphite
+input:x:994:graphite
+gamemode:x:960:graphite
+docker:x:961:graphite
+graphite:x:1000:

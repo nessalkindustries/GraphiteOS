@@ -1,0 +1,8 @@
+[Unit]
+Description=Fix ownership of GraphiteOS live user home
+Before=display-manager.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/chown -R graphite:graphite /home/graphite
+[Install]
+WantedBy=multi-user.target
