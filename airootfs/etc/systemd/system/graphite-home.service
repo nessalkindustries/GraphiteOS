@@ -4,6 +4,7 @@ Before=display-manager.service
 ConditionPathExists=/opt/graphite/install.sh
 [Service]
 Type=oneshot
+StandardOutput=journal+console
 ExecStart=/opt/graphite/install.sh --live --user graphite
 [Install]
 WantedBy=multi-user.target
