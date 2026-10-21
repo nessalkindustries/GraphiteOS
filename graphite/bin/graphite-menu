@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Graphite rofi menus: power | clipboard | emoji  (bound to Super+Esc, Super+Shift+V, Super+.)
+set -euo pipefail
+dmenu() { rofi -dmenu -i -p "$1" -theme-str "window { width: ${2:-380px}; } listview { lines: ${3:-6}; }"; }
+case ${1:-power} in
+  power)
+    choice=$(printf '%s\n' "󰌾  Lock" "󰍃  Log out" "󰤄  Suspend" "󰜉  Reboot" "󰐥  Shut down" | dmenu "Power" 320px 5) || exit 0
+    case $choice in
+      *Lock)       loginctl lock-session || hyprlock ;;
+      *"Log out")  hyprctl dispatch exit ;;
+      *Suspend)    systemctl suspend ;;
+      *Reboot)     systemctl reboot ;;
+      *"Shut down") systemctl poweroff ;;
+    esac ;;
+  clipboard)
+    command -v cliphist >/dev/null || { notify-send "Clipboard" "cliphist is not installed"; exit 1; }
+    sel=$(cliphist list | dmenu "Clipboard" 640px 10) || exit 0
+    cliphist decode <<<"$sel" | wl-copy ;;
+  emoji)
+    # rofi-emoji copies the chosen emoji (and types it with wtype when available)
+    exec rofi -modi emoji -show emoji -theme-str 'window { width: 560px; }' ;;
+  *) echo "usage: graphite-menu power|clipboard|emoji" >&2; exit 1 ;;
+esac

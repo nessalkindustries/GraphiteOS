@@ -1,28 +1,36 @@
 #!/usr/bin/env bash
-# Super+K cheatsheet: list Hyprland keybindings from the user's config in rofi
-# (or print them when not in a graphical session). A trailing "# text" comment
-# on a bind line is used as its description.
+# Super+K cheatsheet: Hyprland keybindings from the user's config, grouped by the
+# "# Section" comment above them, shown in rofi (or printed outside a session).
+# A trailing "# text" comment on a bind line is used as its description.
 set -euo pipefail
 CONF=${1:-$HOME/.config/hypr/hyprland.conf}
 list() {
   awk '
     /^[[:space:]]*\$mod[[:space:]]*=/ { split($0, a, "="); gsub(/[[:space:]]/, "", a[2]); mod=a[2] }
+    /^# [A-Z][A-Za-z ]+$/ { hdr=substr($0, 3); next }
     /^[[:space:]]*bind[a-z]*[[:space:]]*=/ {
       line=$0; desc=""
-      if (index(line, "#")) { desc=substr(line, index(line, "#")+1); line=substr(line, 1, index(line, "#")-1) }
+      if (index(line, "# ")) { desc=substr(line, index(line, "# ")+2); line=substr(line, 1, index(line, "# ")-1) }
       sub(/^[^=]*=[[:space:]]*/, "", line)
       n=split(line, f, ",")
       for (i=1;i<=n;i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", f[i])
-      mods=f[1]; gsub(/\$mod/, mod, mods); gsub(/ /, " + ", mods)
-      key=(mods=="" ? f[2] : mods " + " f[2])
+      mods=f[1]; gsub(/\$mod/, mod, mods); gsub(/SUPER/, "Super", mods); gsub(/SHIFT/, "Shift", mods)
+      gsub(/CTRL/, "Ctrl", mods); gsub(/ALT/, "Alt", mods); gsub(/ +/, " + ", mods)
+      k=f[2]; sub(/^Return$/, "Enter", k); sub(/^period$/, ".", k); sub(/^mouse:272$/, "Left drag", k)
+      sub(/^mouse:273$/, "Right drag", k); sub(/^mouse_down$/, "Scroll down", k); sub(/^mouse_up$/, "Scroll up", k)
+      sub(/^XF86/, "", k)
+      key=(mods=="" ? k : mods " + " k)
       act=f[3]; for (i=4;i<=n;i++) act=act " " f[i]
-      gsub(/mouse:272/, "Left mouse", key); gsub(/mouse:273/, "Right mouse", key)
       if (desc != "") act=desc
-      printf "%-28s %s\n", key, act
+      if (seen[act]++) next
+      if (hdr != "") { printf "%s── %s\n", (shown ? "\n" : ""), hdr; hdr=""; shown=1 }
+      printf "  %-24s %s\n", key, act
     }' "$CONF"
 }
 if [[ -n ${WAYLAND_DISPLAY:-} ]] && command -v rofi >/dev/null; then
-  list | rofi -dmenu -i -p "Keybindings" -no-custom >/dev/null || true
+  list | rofi -dmenu -i -p "Keybindings" -no-custom -markup-rows=false \
+    -theme-str 'window { width: 640px; } listview { lines: 16; } element { padding: 3px 10px; } element-text { font: "JetBrainsMono Nerd Font 10.5"; }' \
+    >/dev/null || true
 else
   list
 fi

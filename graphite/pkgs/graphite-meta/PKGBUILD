@@ -2,7 +2,7 @@
 # Graphite meta-packages: dependency lists only (generated from packages/*.txt).
 pkgbase=graphite-meta
 pkgname=(graphite-desktop graphite-gaming graphite-dev graphite-nvidia)
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"

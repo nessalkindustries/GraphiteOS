@@ -1,14 +1,57 @@
+// Graphite Waybar: slim floating pills. Colours from the active theme.
 {
-  "layer": "top", "position": "top", "height": 30,
+  "layer": "top",
+  "position": "top",
+  "height": 34,
+  "margin-top": 8,
+  "margin-left": 12,
+  "margin-right": 12,
+  "spacing": 6,
   "modules-left": ["custom/logo", "hyprland/workspaces"],
   "modules-center": ["clock"],
-  "modules-right": ["custom/gamemode", "cpu", "memory", "pulseaudio", "network", "battery", "tray"],
-  "custom/logo": { "format": "  Graphite", "on-click": "rofi -show drun" },
-  "custom/gamemode": { "exec": "gamemoded -s | grep -q 'is active' && echo '󰊴 GM' || echo ''", "interval": 5 },
-  "clock": { "format": "{:%a %d %b  %H:%M}" },
-  "cpu": { "format": " {usage}%" },
-  "memory": { "format": " {}%" },
-  "pulseaudio": { "format": " {volume}%", "on-click": "pavucontrol" },
-  "network": { "format-ethernet": "󰈀 {ipaddr}", "format-wifi": " {essid}", "format-disconnected": "󰖪" },
-  "battery": { "format": "{icon} {capacity}%", "format-icons": ["","","","",""] }
+  "modules-right": ["tray", "group/status", "custom/power"],
+
+  "custom/logo": { "format": "󰣇", "tooltip-format": "Apps (Super+Space)", "on-click": "rofi -show drun" },
+  "hyprland/workspaces": {
+    "format": "{icon}",
+    "format-icons": { "active": "", "default": "", "empty": "" },
+    "persistent-workspaces": { "*": 4 },
+    "on-scroll-up": "hyprctl dispatch workspace e-1",
+    "on-scroll-down": "hyprctl dispatch workspace e+1"
+  },
+  "clock": {
+    "format": "{:%a %d %b  %H:%M}",
+    "tooltip-format": "<tt>{calendar}</tt>",
+    "calendar": { "mode": "month", "format": { "today": "<b><u>{}</u></b>" } }
+  },
+  "tray": { "icon-size": 15, "spacing": 8 },
+  "group/status": {
+    "orientation": "horizontal",
+    "modules": ["network", "pulseaudio", "battery"]
+  },
+  "network": {
+    "format-ethernet": "󰈀",
+    "format-wifi": "{icon}",
+    "format-icons": ["󰤟", "󰤢", "󰤥", "󰤨"],
+    "format-disconnected": "󰤭",
+    "tooltip-format-ethernet": "{ifname}  {ipaddr}",
+    "tooltip-format-wifi": "{essid} ({signalStrength}%)  {ipaddr}",
+    "on-click": "kitty --class nmtui -e nmtui"
+  },
+  "pulseaudio": {
+    "format": "{icon}",
+    "format-muted": "󰝟",
+    "format-icons": { "default": ["󰕿", "󰖀", "󰕾"] },
+    "tooltip-format": "{volume}%  {desc}",
+    "on-click": "pavucontrol",
+    "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+  },
+  "battery": {
+    "format": "{icon}",
+    "format-charging": "󰂄",
+    "format-icons": ["󰁺", "󰁼", "󰁾", "󰂀", "󰁹"],
+    "tooltip-format": "{capacity}%  {timeTo}",
+    "states": { "warning": 25, "critical": 12 }
+  },
+  "custom/power": { "format": "󰐥", "tooltip-format": "Power (Super+Esc)", "on-click": "graphite-menu power" }
 }

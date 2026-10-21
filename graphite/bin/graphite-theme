@@ -3,7 +3,7 @@
 # `key = "value"` pairs). Applying renders $GRAPHITE_PATH/templates/*.tpl into
 # ~/.config/graphite/current/ ({{key}} -> value, {{key.hex}} -> value without '#').
 # mako has no include support, so ~/.config/mako/config is owned by the theme.
-# Usage: graphite-theme list | current | set NAME | apply
+# Usage: graphite-theme list | current | set NAME | pick | apply
 set -euo pipefail
 GRAPHITE_PATH=${GRAPHITE_PATH:-/usr/share/graphite}
 USER_THEMES="$HOME/.config/graphite/themes"   # user themes override shipped ones
@@ -20,33 +20,59 @@ theme_dir() {
 current() { cat "$STATE/theme" 2>/dev/null || echo graphite-teal; }
 
 render() {
-  local dir=$1 tpl key val sedargs=()
+  local dir=$1 tpl key val line sedargs=() wp mode
+  declare -A v=()
   while IFS= read -r line; do
-    [[ $line =~ ^[[:space:]]*([a-z_]+)[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]] || continue
-    key=${BASH_REMATCH[1]}; val=${BASH_REMATCH[2]}
-    sedargs+=(-e "s|{{$key}}|$val|g" -e "s|{{$key.hex}}|${val#\#}|g")
+    [[ $line =~ ^[[:space:]]*([a-z_0-9]+)[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]] || continue
+    v[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}
   done < "$dir/colors.toml"
+  # derived values
+  wp=${v[wallpaper]:-graphite.png}
+  [[ $wp == /* ]] || wp="/usr/share/backgrounds/graphite/$wp"
+  [[ -f $dir/$(basename "$wp") ]] && wp="$dir/$(basename "$wp")"
+  [[ -f $wp ]] || wp=/usr/share/backgrounds/graphite/graphite.png
+  mode=${v[mode]:-dark}
+  v[wallpaper_path]=$wp
+  v[home]=$HOME
+  v[prefer_dark]=$([[ $mode == light ]] && echo 0 || echo 1)
+  v[lock_brightness]=$([[ $mode == light ]] && echo 0.95 || echo 0.6)
+  : "${v[gtk_theme]:=adw-gtk3-dark}" "${v[icon_theme]:=Papirus-Dark}" "${v[scheme]:=prefer-dark}"
+  for key in "${!v[@]}"; do
+    val=${v[$key]}
+    sedargs+=(-e "s|{{$key}}|$val|g" -e "s|{{$key.hex}}|${val#\#}|g")
+  done
   mkdir -p "$OUT"
   for tpl in "$GRAPHITE_PATH"/templates/*.tpl; do
     sed "${sedargs[@]}" "$tpl" > "$OUT/$(basename "${tpl%.tpl}")"
   done
-  mkdir -p "$HOME/.config/mako"
+  echo "$wp" > "$OUT/wallpaper"
+  printf 'GTK_THEME_NAME=%s\nICON_THEME=%s\nCOLOR_SCHEME=%s\n' "${v[gtk_theme]}" "${v[icon_theme]}" "${v[scheme]}" > "$OUT/env"
+  # files the theme owns outright (these programs have no include mechanism)
+  mkdir -p "$HOME/.config/mako" "$HOME/.config/qt6ct" "$HOME/.config/gtk-3.0" "$HOME/.config/gtk-4.0"
   mv -f "$OUT/mako.config" "$HOME/.config/mako/config"
-  local wp
-  wp=$(sed -n 's/^wallpaper *= *"\(.*\)"/\1/p' "$dir/colors.toml")
-  if [[ -n $wp ]]; then
-    [[ $wp == /* ]] || wp="/usr/share/backgrounds/graphite/$wp"
-    [[ -f $dir/$(basename "$wp") ]] && wp="$dir/$(basename "$wp")"
-    echo "$wp" > "$OUT/wallpaper"
-  fi
+  mv -f "$OUT/qt6ct.conf" "$HOME/.config/qt6ct/qt6ct.conf"
+  cp -f "$OUT/gtk-settings.ini" "$HOME/.config/gtk-3.0/settings.ini"
+  mv -f "$OUT/gtk-settings.ini" "$HOME/.config/gtk-4.0/settings.ini"
 }
 
 reload_desktop() {
+  # GTK apps follow the gsettings keys live (needs a session bus; harmless without one)
+  if command -v gsettings >/dev/null && [[ -n ${DBUS_SESSION_BUS_ADDRESS:-} ]]; then
+    # shellcheck disable=SC1091
+    . "$OUT/env"
+    gsettings set org.gnome.desktop.interface gtk-theme "$GTK_THEME_NAME" 2>/dev/null || true
+    gsettings set org.gnome.desktop.interface icon-theme "$ICON_THEME" 2>/dev/null || true
+    gsettings set org.gnome.desktop.interface color-scheme "$COLOR_SCHEME" 2>/dev/null || true
+    gsettings set org.gnome.desktop.interface cursor-theme capitaine-cursors 2>/dev/null || true
+  fi
   [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] || return 0
   hyprctl reload >/dev/null 2>&1 || true
   pkill -SIGUSR2 -x waybar 2>/dev/null || true      # waybar reloads its CSS
   makoctl reload 2>/dev/null || true
   pkill -SIGUSR1 -x kitty 2>/dev/null || true       # kitty reloads its config
+  # new wallpaper: restart the wallpaper daemon detached from this shell
+  pkill -x hyprpaper 2>/dev/null; pkill -x swaybg 2>/dev/null
+  setsid -f graphite-wallpaper >/dev/null 2>&1 || true
 }
 
 case ${1:-current} in
@@ -63,5 +89,14 @@ case ${1:-current} in
   apply)
     dir=$(theme_dir "$(current)") || dir=$(theme_dir graphite-teal)
     render "$dir"; reload_desktop ;;
-  *) echo "usage: graphite-theme list|current|set NAME|apply" >&2; exit 1 ;;
+  pick)
+    # rofi picker (Super+T): shows each theme's display name, applies the choice live
+    choice=$(for t in $("$0" list | sed 's/^[* ] //'); do
+               d=$(theme_dir "$t") || continue
+               n=$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$d/colors.toml")
+               printf '%s\t%s\n' "$t" "${n:-$t}"
+             done | rofi -dmenu -i -p "Theme" -display-columns 2 -display-column-separator '\t' \
+                    -theme-str 'window { width: 420px; }') || exit 0
+    exec "$0" set "${choice%%$'\t'*}" ;;
+  *) echo "usage: graphite-theme list|current|set NAME|pick|apply" >&2; exit 1 ;;
 esac

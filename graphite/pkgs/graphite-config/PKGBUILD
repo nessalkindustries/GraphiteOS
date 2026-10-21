@@ -2,7 +2,7 @@
 # Graphite defaults: CLI, themes, migrations, skel configs, system drop-ins.
 # Never overwrites files owned by other packages (rule: overlay, not replacement).
 pkgname=graphite-config
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Graphite defaults: CLI, themes, user config skeleton, system drop-ins"
 arch=(any)
@@ -29,6 +29,7 @@ package() {
   cp -r "$src"/config/. "$pkgdir/etc/skel/.config/"
   # assets
   install -Dm644 -t "$pkgdir/usr/share/backgrounds/graphite" "$src"/assets/backgrounds/*
+  install -Dm644 "$src/assets/fastfetch/logo.txt" "$share/fastfetch/logo.txt"
   install -d "$pkgdir/usr/share/sddm/themes/graphite"
   cp -r "$src"/assets/sddm-theme/. "$pkgdir/usr/share/sddm/themes/graphite/"
   # system drop-ins (files no other package owns)

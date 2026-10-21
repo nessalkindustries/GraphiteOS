@@ -6,7 +6,11 @@ hypridle
 xdg-desktop-portal-hyprland
 xdg-desktop-portal-gtk
 waybar
-rofi-wayland
+rofi
+rofi-emoji
+cliphist
+wtype
+libnotify
 kitty
 mako
 grim
@@ -29,3 +33,12 @@ noto-fonts
 noto-fonts-emoji
 papirus-icon-theme
 xorg-xwayland
+# look & feel (all official repos)
+inter-font
+fastfetch
+plymouth
+capitaine-cursors
+adw-gtk-theme
+gnome-themes-extra
+qt6ct
+dconf
