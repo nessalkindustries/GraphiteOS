@@ -1,0 +1,2 @@
+# Graphite (installed systems): members of wheel may use sudo WITH their password.
+%wheel ALL=(ALL:ALL) ALL
