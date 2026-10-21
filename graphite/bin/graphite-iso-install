@@ -105,7 +105,7 @@ CONF=$(mktemp)
 sed '/^\[graphite\]/,/^$/d' /etc/pacman.conf > "$CONF"
 grep -q '^\[multilib\]' "$CONF" || printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> "$CONF"
 printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$REPO_SRC" >> "$CONF"
-[[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[options\]/a CacheServer = $GRAPHITE_CACHE_SERVER" "$CONF"
+[[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[\(core\|extra\|multilib\)\]$/a CacheServer = $GRAPHITE_CACHE_SERVER" "$CONF"
 pacstrap -C "$CONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
   btrfs-progs cryptsetup grub efibootmgr sudo networkmanager nano vim man-db
 
@@ -115,7 +115,7 @@ install -d "$MNT/var/lib/graphite"
 cp -a "$REPO_SRC" "$MNT/var/lib/graphite/repo"
 cp -a "$GRAPHITE_SRC" "$MNT/var/lib/graphite/src"
 sed -e "s#file://$REPO_SRC#file:///var/lib/graphite/repo#" -e '/^CacheServer/d' "$CONF" > "$MNT/etc/pacman.conf"
-[[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[options\]/a CacheServer = $GRAPHITE_CACHE_SERVER" "$MNT/etc/pacman.conf"
+[[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[\(core\|extra\|multilib\)\]$/a CacheServer = $GRAPHITE_CACHE_SERVER" "$MNT/etc/pacman.conf"
 ln -sf "/usr/share/zoneinfo/$TZ_" "$MNT/etc/localtime"
 echo "$HOSTNAME_" > "$MNT/etc/hostname"
 sed -i "s/^#\($LOCALE .*\)/\1/" "$MNT/etc/locale.gen"; grep -q "^en_US.UTF-8" "$MNT/etc/locale.gen" || sed -i 's/^#\(en_US.UTF-8 .*\)/\1/' "$MNT/etc/locale.gen"

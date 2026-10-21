@@ -4,6 +4,9 @@
 set -euo pipefail
 GRAPHITE_PATH=${GRAPHITE_PATH:-/usr/share/graphite}
 export GRAPHITE_PATH
+# HOME is unset under systemd units / some sudo setups
+: "${HOME:=$(getent passwd "$(id -un)" | cut -d: -f6)}"
+export HOME
 STATE_DIR="$HOME/.local/state/graphite"
 NEWS_URL=${GRAPHITE_NEWS_URL:-https://archlinux.org/feeds/news/}
 
