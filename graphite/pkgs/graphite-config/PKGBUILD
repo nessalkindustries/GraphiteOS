@@ -30,6 +30,7 @@ package() {
   # assets
   install -Dm644 -t "$pkgdir/usr/share/backgrounds/graphite" "$src"/assets/backgrounds/*
   install -Dm644 "$src/assets/fastfetch/logo.txt" "$share/fastfetch/logo.txt"
+  install -Dm644 -t "$pkgdir/usr/share/plymouth/themes/graphite" "$src"/assets/plymouth/graphite/*
   install -d "$pkgdir/usr/share/sddm/themes/graphite"
   cp -r "$src"/assets/sddm-theme/. "$pkgdir/usr/share/sddm/themes/graphite/"
   # system drop-ins (files no other package owns)

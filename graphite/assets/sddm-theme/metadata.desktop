@@ -2,7 +2,7 @@
 Name=Graphite
 Description=Graphite dark theme with teal accent
 Type=sddm-theme
-Version=0.1
+Version=0.3
 MainScript=Main.qml
 Theme-API=2.0
 QtVersion=6

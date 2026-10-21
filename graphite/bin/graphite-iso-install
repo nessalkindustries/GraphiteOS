@@ -157,6 +157,11 @@ log "Bootloader (GRUB, UEFI, removable path + NVRAM entry)"
 arch-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Graphite >/dev/null 2>&1 \
   || echo "note: NVRAM entry not written (fine in VMs); removable path is used"
 arch-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --removable >/dev/null
+# Plymouth splash (graphite theme, LUKS prompt on the splash). Skipped for serial
+# test installs, where the passphrase is typed on the serial console.
+if ((SERIAL == 0)); then
+  arch-chroot "$MNT" graphite splash on --no-rebuild || log "warning: boot splash not enabled"
+fi
 arch-chroot "$MNT" mkinitcpio -P >/dev/null
 arch-chroot "$MNT" grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
 

@@ -17,7 +17,8 @@ Graphite command center ($(cat "$GRAPHITE_PATH/VERSION" 2>/dev/null || echo dev)
 Usage: graphite <command> [args]
   update [--yes] [--no-news]  Arch news check -> pacman -Syu -> migrations -> pacnew report
   migrate [--pending]         run (or list) pending migrations for this user
-  theme list|current|set N    themes (colors.toml -> generated configs)
+  theme list|current|set N|pick   themes (colors.toml -> generated configs; Super+T)
+  splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
   keybinds                    keybinding cheatsheet (also Super+K)
   snapshots                   list Snapper snapshots of /
   rollback N                  make snapshot N the new root (reboot afterwards)
@@ -137,6 +138,45 @@ doctor() {
   return $fail
 }
 
+# --- Plymouth boot splash ----------------------------------------------------
+# on : graphite Plymouth theme, `plymouth` hook before `encrypt` (so the LUKS
+#      passphrase is asked on the splash), `splash` on the GRUB kernel cmdline.
+# --no-rebuild skips mkinitcpio/grub-mkconfig (the installer runs those itself).
+splash() {
+  local action=${1:-status} rebuild=1 hooks
+  [[ ${2:-} == --no-rebuild ]] && rebuild=0
+  hooks=$(sed -n 's/^HOOKS=(\(.*\))/\1/p' /etc/mkinitcpio.conf)
+  case $action in
+    status)
+      echo "theme:   $(plymouth-set-default-theme 2>/dev/null || echo 'plymouth not installed')"
+      [[ " $hooks " == *" plymouth "* ]] && echo "hook:    yes" || echo "hook:    no"
+      grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT=.*\bsplash\b' /etc/default/grub && echo "cmdline: splash" || echo "cmdline: no splash"
+      return 0 ;;
+    on|off) ;;
+    *) echo "usage: graphite splash on|off|status [--no-rebuild]" >&2; return 1 ;;
+  esac
+  [[ $EUID -eq 0 ]] || exec sudo GRAPHITE_PATH="$GRAPHITE_PATH" "$0" splash "$@"
+  if [[ $action == on ]]; then
+    command -v plymouth-set-default-theme >/dev/null || { echo "plymouth is not installed (sudo pacman -S plymouth)" >&2; return 1; }
+    plymouth-set-default-theme graphite
+    if [[ " $hooks " != *" plymouth "* ]]; then
+      if [[ " $hooks " == *" encrypt "* ]]; then hooks=${hooks/encrypt/plymouth encrypt}
+      elif [[ " $hooks " == *" block "* ]]; then hooks=${hooks/block/plymouth block}
+      else hooks="$hooks plymouth"; fi
+    fi
+    grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT=.*\bsplash\b' /etc/default/grub \
+      || sed -i -E 's/^(GRUB_CMDLINE_LINUX_DEFAULT=".*)"/\1 splash"/' /etc/default/grub
+  else
+    hooks=$(sed -E 's/(^| )plymouth( |$)/ /; s/^ //; s/ $//' <<<"$hooks")
+    sed -i -E 's/^(GRUB_CMDLINE_LINUX_DEFAULT=".*) splash(.*")/\1\2/' /etc/default/grub
+  fi
+  sed -i "s/^HOOKS=.*/HOOKS=($hooks)/" /etc/mkinitcpio.conf
+  if ((rebuild)); then
+    mkinitcpio -P && grub-mkconfig -o /boot/grub/grub.cfg
+  fi
+  echo "boot splash: $action"
+}
+
 cmd=${1:-help}; shift || true
 case $cmd in
   update) update "$@" ;;
@@ -145,6 +185,7 @@ case $cmd in
   keybinds) graphite-keybinds "$@" ;;
   snapshots) snapshots ;;
   rollback) rollback "$@" ;;
+  splash) splash "$@" ;;
   doctor) doctor ;;
   install) exec "$GRAPHITE_PATH/install.sh" "$@" ;;
   version) cat "$GRAPHITE_PATH/VERSION" ;;

@@ -9,3 +9,4 @@
     accent2: {{accent2}};
     onacc:   {{on_accent}};
 }
+configuration { icon-theme: "{{icon_theme}}"; }
