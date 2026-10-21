@@ -35,7 +35,7 @@ PROFILE=$(mktemp -d); trap 'rm -rf "$PROFILE"' EXIT
 tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite --exclude=./tests --exclude=./tools \
   -cf - . | tar -xf - -C "$PROFILE"
 printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$OUT/graphite-repo" >> "$PROFILE/pacman.conf"
-{ echo "graphite-config"; echo "graphite-desktop"; echo "graphite-gaming"; echo "graphite-dev"
+{ echo "pipewire-jack"; echo "graphite-config"; echo "graphite-desktop"; echo "graphite-gaming"; echo "graphite-dev"
   [ "$NVIDIA" = 1 ] && echo "graphite-nvidia"; } >> "$PROFILE/packages.x86_64"
 
 # 3. embed installer tree + repo
