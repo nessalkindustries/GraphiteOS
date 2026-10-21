@@ -14,6 +14,11 @@ H() { setpriv --reuid="$UID_" --regid="$(id -g $U)" --init-groups env HOME=/home
         XDG_RUNTIME_DIR="$RT" HYPRLAND_INSTANCE_SIGNATURE="$sig" WAYLAND_DISPLAY=wayland-1 \
         DBUS_SESSION_BUS_ADDRESS="unix:path=$RT/bus" PATH=/usr/local/bin:/usr/bin "$@"; }
 shot() { echo "RICE-SHOT $1"; sleep "${2:-14}"; }
+# optional: newer configs from the host tree (iterate without an ISO rebuild)
+if curl -fsS "@HOST@/override/hyprland.conf" -o /tmp/hl.conf 2>/dev/null; then
+  install -o $U -m644 /tmp/hl.conf /home/$U/.config/hypr/hyprland.conf && echo "RICE: using host hyprland.conf override"
+  sleep 5; H hyprctl reload >/dev/null 2>&1
+fi
 sleep 25   # let waybar/wallpaper/mako settle (software rendering is slow)
 echo "RICE: configerrors: $(H hyprctl configerrors 2>&1 | tr '\n' ' ')"
 echo "RICE: layers: $(H hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | sort -u | tr '\n' ' ')"

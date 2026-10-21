@@ -4,11 +4,16 @@ screendump every "RICE-SHOT <name>" scene to out/rice/<name>.png.
 Usage: tests/rice-shots.py [ISO]"""
 import glob, http.server, os, re, socket, socketserver, subprocess, sys, threading, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ISO = sys.argv[1] if len(sys.argv) > 1 else max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
+ISO = [a for a in sys.argv[1:] if not a.startswith("--")][0] if [a for a in sys.argv[1:] if not a.startswith("--")] else max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
 OUT = os.path.join(ROOT, "out", "rice"); os.makedirs(OUT, exist_ok=True)
 PORT = 8766
 www = os.path.join(OUT, "www"); os.makedirs(www, exist_ok=True)
-subprocess.run(["cp", os.path.join(ROOT, "tests", "rice-demo.sh"), www], check=True)
+open(os.path.join(www, "rice-demo.sh"), "w").write(open(os.path.join(ROOT, "tests", "rice-demo.sh")).read().replace("@HOST@", f"http://10.0.2.2:{PORT}"))
+if "--override" in sys.argv:
+    os.makedirs(os.path.join(www, "override"), exist_ok=True)
+    subprocess.run(["cp", os.path.join(ROOT, "graphite", "config", "hypr", "hyprland.conf"), os.path.join(www, "override")], check=True)
+else:
+    subprocess.run(["rm", "-rf", os.path.join(www, "override")])
 class Q(http.server.SimpleHTTPRequestHandler):
     def __init__(s, *a, **k): super().__init__(*a, directory=www, **k)
     def log_message(s, *a): pass
@@ -21,7 +26,7 @@ sock = os.path.join(OUT, "mon.sock")
 cmd = ["qemu-system-x86_64", "-machine", "q35", "-accel", "tcg,thread=multi", "-cpu", "max", "-m", "6144", "-smp", "4",
        "-kernel", f"{kd}/vmlinuz-linux", "-initrd", f"{kd}/initramfs-linux.img",
        "-append", f"archisobasedir=graphite archisolabel={label} console=tty0 console=ttyS0,115200 graphite.tz=America/Toronto graphite.autorun=http://10.0.2.2:{PORT}/rice-demo.sh",
-       "-cdrom", ISO, "-display", "none", "-vga", "none", "-device", "virtio-vga,xres=1600,yres=900",
+       "-cdrom", ISO, "-display", "none", "-vga", "none", "-device", "virtio-vga,xres=1280,yres=800",
        "-serial", "stdio", "-monitor", f"unix:{sock},server,nowait", "-nic", "user,model=virtio-net-pci", "-no-reboot"]
 log = open(os.path.join(OUT, "serial.log"), "wb")
 p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
