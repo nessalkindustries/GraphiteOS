@@ -35,6 +35,11 @@ mkdir -p "$A/usr/local/bin" "$A/usr/share/backgrounds/graphite" "$A/usr/share/sd
 for f in graphite/bin/*; do ln -sfn "/opt/graphite/bin/$(basename "$f")" "$A/usr/local/bin/$(basename "$f")"; done
 cp -a graphite/assets/backgrounds/. "$A/usr/share/backgrounds/graphite/"
 cp -a graphite/assets/sddm-theme "$A/usr/share/sddm/themes/graphite"
+# mkarchiso resets airootfs modes to 0644 unless listed in file_permissions, so
+# register every executable in graphite/ (install.sh, bin/*, scripts) as 0755.
+while IFS= read -r f; do
+  sed -i "/^file_permissions=(/a\\  [\"/opt/$f\"]=\"0:0:755\"" "$PROFILE/profiledef.sh"
+done < <(find graphite -type f -perm -u+x | sort)
 # distinct ISO name so the NVIDIA build never overwrites the standard ISO
 [ "$NVIDIA" = 1 ] && sed -i 's/^iso_name=.*/iso_name="graphite-nvidia"/' "$PROFILE/profiledef.sh"
 
