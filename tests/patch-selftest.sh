@@ -12,6 +12,7 @@ install -m755 /tmp/selftest.sh /mnt/usr/local/sbin/graphite-selftest
 # refresh the graphite CLI from the working tree (tests CLI fixes without a reinstall)
 install -m755 /tmp/graphite-bin /mnt/usr/share/graphite/bin/graphite
 rm -rf /mnt/home/.graphite-selftest
+sed -i -E 's/,?subvolid=[0-9]+//' /mnt/etc/fstab   # installer fix, applied to the reused disk
 mount /dev/vda1 /mnt/boot
 # diagnose + apply the per-unit enable fix from install/system.sh on this disk
 arch-chroot /mnt systemctl enable graphite-selftest.service  # stage 4 disables it

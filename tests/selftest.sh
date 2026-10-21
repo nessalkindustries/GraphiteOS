@@ -59,7 +59,9 @@ case $stage in
   if HOME=/root graphite update --yes > "$ST/update.log" 2>&1; then say "ok   graphite update"; else say "FAIL graphite update"; tail -20 "$ST/update.log"; fails=$((fails+1)); fi
   sed 's/^/  | /' "$ST/update.log" | tail -15
   say "installing cowsay (snap-pac pre/post) for the rollback test"
+  pacman -Q cowsay >/dev/null 2>&1 && pacman -Rns --noconfirm cowsay >/dev/null 2>&1  # reused disk: start clean
   pacman -S --noconfirm cowsay >/dev/null 2>&1
+  check "fstab mounts by subvol name only (rollback-safe)" '! grep -q subvolid= /etc/fstab'
   check "snap-pac created pre/post snapshots" '[[ $(snapper --csvout -c root list --columns type | grep -cE "^(pre|post)$") -ge 2 ]]'
   pre=$(snapper --csvout -c root list --columns number,type,description | awk -F, '$2=="pre" && /cowsay/ {n=$1} END{print n}')
   echo "$pre" > "$ST/pre"; say "rollback target (pre-cowsay snapshot) = $pre"

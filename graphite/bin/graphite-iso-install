@@ -111,6 +111,8 @@ pacstrap -C "$CONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode inte
 
 log "Configuring target"
 genfstab -U "$MNT" >> "$MNT/etc/fstab"
+# mount by subvolume *name* only: a rollback replaces @ with a new subvolume id
+sed -i -E 's/,?subvolid=[0-9]+//' "$MNT/etc/fstab"
 install -d "$MNT/var/lib/graphite"
 cp -a "$REPO_SRC" "$MNT/var/lib/graphite/repo"
 cp -a "$GRAPHITE_SRC" "$MNT/var/lib/graphite/src"

@@ -4,7 +4,12 @@
 if ((! LIVE)); then
   # one unit per call: a single bad unit must not leave the others disabled
   enable() { local u; for u in "$@"; do systemctl enable "$u" >/dev/null 2>&1 || warn "could not enable $u: $(systemctl enable "$u" 2>&1 | tail -1)"; done; }
-  enable sddm.service graphite-firewall.service power-profiles-daemon.service
+  # sddm has only Alias=display-manager.service in [Install]; under arch-chroot from
+  # the live ISO 'systemctl enable' failed silently there, so fall back to creating
+  # exactly the alias link systemctl would create
+  systemctl enable sddm.service >/dev/null 2>&1 \
+    || ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+  enable graphite-firewall.service power-profiles-daemon.service
   enable fstrim.timer paccache.timer reflector.timer fwupd-refresh.timer
   [[ $PROFILE == full ]] && enable docker.service
   usermod -aG gamemode,docker "$TARGET_USER" 2>/dev/null || true
