@@ -7,7 +7,7 @@ HOST=@HOST@
 # keyring must be ready before pacstrap (ISOs before the installer fix need this here)
 # (a nested 'systemctl start' from this unit hung on old ISOs: pacman-init is
 # queued behind time-sync.target in the boot transaction) -> poll, then fall back.
-for _ in $(seq 120); do
+for _ in $(seq 24); do
   [ "$(systemctl is-active pacman-init.service)" = active ] && break
   sleep 5
 done

@@ -1,7 +1,7 @@
 [Unit]
 Description=Graphite live: fetch and run a script from graphite.autorun=URL (QEMU test harness)
 ConditionKernelCommandLine=graphite.autorun
-After=network-online.target graphite-home.service pacman-init.service
+After=network-online.target graphite-home.service
 Wants=network-online.target
 [Service]
 Type=oneshot

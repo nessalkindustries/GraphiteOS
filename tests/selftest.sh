@@ -87,8 +87,14 @@ case $stage in
 4)
   say "STAGE4 after rollback"
   check "cowsay gone after rollback (root restored)" '! command -v cowsay'
+  check "pacman usable after rollback (no stale db.lck)" '! test -e /var/lib/pacman/db.lck && pacman -Q base'
   common_checks
   say "ALL DONE fails=$fails"
   systemctl disable graphite-selftest.service >/dev/null 2>&1
+  # harness-only: autologin for the screenshot boot that follows (installed systems never get this)
+  if systemctl is-enabled sddm.service >/dev/null 2>&1; then
+    mkdir -p /etc/sddm.conf.d
+    printf '[Autologin]\nUser=%s\nSession=hyprland\n' "$U" > /etc/sddm.conf.d/99-harness-autologin.conf
+  fi
   systemctl poweroff ;;
 esac

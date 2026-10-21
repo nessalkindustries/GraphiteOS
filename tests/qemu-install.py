@@ -12,7 +12,7 @@ Needs: qemu-system-x86_64, OVMF (4M), 7z, python3; host package cache at
 /var/cache/graphite-pkg (filled by build.sh) is served to the guest as a
 pacman CacheServer so the install doesn't re-download everything.
 """
-import glob, http.server, os, re, shutil, socketserver, subprocess, sys, threading, time
+import socket, glob, http.server, os, re, shutil, socketserver, subprocess, sys, threading, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "out", "harness")
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -76,7 +76,10 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
             note(f"{logname}: TIMEOUT after {timeout}s"); p.kill(); break
         try: chunk = p.stdout.read(4096)
         except BlockingIOError: chunk = None
-        if not chunk: time.sleep(0.2); continue
+        if not chunk:
+            time.sleep(0.2)
+            if on_line and buf: on_line(buf.decode(errors="replace"), p, state)   # timers
+            continue
         log.write(chunk); log.flush(); buf = (buf + chunk)[-20000:]
         text = buf.decode(errors="replace")
         for m in re.finditer(r"SELFTEST: [^\r\n]*[\r\n]", text):
@@ -118,6 +121,28 @@ for boot in range(1, 7):
     note(f"boot {boot} ended after {int(time.time()-t)}s")
     if "SELFTEST: ALL DONE" in out:
         break
+# --- 3. screenshot boot: SDDM (harness autologin) -> Hyprland desktop -------
+if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.glob(os.path.join(OUT, "boot-*.log"))):
+    sock = os.path.join(OUT, "mon.sock"); ppm = os.path.join(OUT, "installed.ppm")
+    def shot(text, p, st):
+        if "login:" in text and "t" not in st:
+            st["t"] = time.time()
+        if "t" in st and "shot" not in st and time.time() - st["t"] > 150:
+            st["shot"] = 1
+            s2 = socket.socket(socket.AF_UNIX); s2.connect(sock)
+            s2.send(f"screendump {ppm}\n".encode()); time.sleep(3)
+            s2.send(b"quit\n"); time.sleep(1); s2.close()
+    def h5(text, p, st):
+        make_handler(5)(text, p, st); shot(text, p, st)
+    qemu(["-monitor", f"unix:{sock},server,nowait"], "boot-shot.log", 1500, on_line=h5)
+    if os.path.exists(ppm):
+        try:
+            from PIL import Image
+            Image.open(ppm).save(os.path.join(ROOT, "out", "graphite-installed-desktop.png")); note("screenshot: out/graphite-installed-desktop.png")
+        except Exception as e:
+            note(f"screenshot convert failed: {e}")
+    else:
+        note("screenshot: not taken")
 allout = "".join(open(f).read() for f in sorted(glob.glob(os.path.join(OUT, "boot-*.log"))))
 fails = sorted(set(re.findall(r"SELFTEST: FAIL[^\r\n]*", allout)))
 done = "SELFTEST: ALL DONE" in allout

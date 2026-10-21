@@ -99,6 +99,8 @@ rollback() {
   snapper -c root create -d "before rollback to $n" -c number >/dev/null 2>&1 || true
   mv "$top/@" "$top/@.before-rollback-$ts"
   btrfs subvolume snapshot "$snap" "$top/@" >/dev/null
+  # snap-pac "pre" snapshots are taken mid-transaction and contain pacman's lock
+  rm -f "$top/@/var/lib/pacman/db.lck"
   # the kernel and initramfs live on the ESP (/boot) and are NOT rolled back
   local snapk curk
   snapk=$(ls "$top/@/usr/lib/modules" 2>/dev/null | sort -V | tail -1)

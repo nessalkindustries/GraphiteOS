@@ -96,9 +96,16 @@ mount -o "$OPTS,subvol=@snapshots" /dev/mapper/cryptroot "$MNT/.snapshots"
 mount -o umask=0077 "$ESP" "$MNT/boot"
 
 log "Base system (pacstrap)"
-# On the live ISO the pacman keyring is created at boot by pacman-init.service;
-# wait for it (starting a finished oneshot is a no-op).
-systemctl start pacman-init.service 2>/dev/null || true
+# On the live ISO the pacman keyring is created at boot by pacman-init.service,
+# but that unit is ordered after time-sync.target and never runs while NTP is
+# unreachable (systemd-time-wait-sync). Wait briefly, then init the keyring ourselves.
+if [[ ! -s /etc/pacman.d/gnupg/trustdb.gpg ]] || ! systemctl -q is-active pacman-init.service 2>/dev/null; then
+  for _ in $(seq 24); do systemctl -q is-active pacman-init.service 2>/dev/null && break; sleep 5; done
+  if ! systemctl -q is-active pacman-init.service 2>/dev/null; then
+    log "pacman-init.service has not run (no time sync?); initialising the live keyring directly"
+    pacman-key --init && pacman-key --populate
+  fi
+fi
 # pacman.conf for the target: Arch defaults + [multilib] + local [graphite] overlay
 # (listed LAST so it can never shadow an official package).
 CONF=$(mktemp)
