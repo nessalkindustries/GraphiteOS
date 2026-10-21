@@ -1,0 +1,7 @@
+post_install() {
+  echo ":: Graphite: run 'graphite install' (or install.sh) to enable services and set up Snapper."
+  echo ":: Existing users get the defaults with: graphite install --no-packages --user <name>"
+}
+post_upgrade() {
+  echo ":: Graphite updated. Pending per-user migrations run with: graphite migrate"
+}

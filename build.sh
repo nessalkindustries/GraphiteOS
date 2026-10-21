@@ -1,40 +1,48 @@
 #!/usr/bin/env bash
-# Build the Graphite ISO. The ISO embeds ./graphite (the install-script tree) at
-# /opt/graphite and installs its package lists; nothing is duplicated in airootfs.
-#   ./build.sh            -> builds natively if on Arch (needs root + archiso)
-#   ./build.sh --nvidia   -> also include the NVIDIA driver stack
-#   ./build.sh --container-> builds inside a privileged archlinux container (podman or docker)
+# Build the Graphite ISO.
+#  1. builds the local [graphite] overlay repo (tools/build-repo.sh) into out/graphite-repo
+#  2. stages a temp copy of the archiso profile (the repo itself is never modified)
+#  3. installs graphite-config + meta-packages from [graphite] into the ISO, and
+#     embeds the installer tree (/opt/graphite) and the repo (/opt/graphite-repo)
+#   ./build.sh [--nvidia]              -> natively on Arch (root + archiso + base-devel)
+#   ./build.sh --container [--nvidia]  -> in a privileged archlinux container
+# PKGCACHE (default /var/cache/graphite-pkg) is shared with the container so
+# rebuilds and the QEMU harness (pacman CacheServer) don't re-download packages.
 set -euo pipefail
 cd "$(dirname "$0")"
 NVIDIA=0; CONTAINER=0
 for a in "$@"; do case $a in --nvidia) NVIDIA=1;; --container) CONTAINER=1;; *) echo "unknown arg $a"; exit 1;; esac; done
 OUT=${OUT:-$PWD/out}; WORK=${WORK:-/tmp/graphite-work}
+PKGCACHE=${PKGCACHE:-/var/cache/graphite-pkg}
 mkdir -p "$OUT"
 
 if [ "$CONTAINER" = 1 ]; then
   ENG=$(command -v podman || command -v docker) || { echo "need podman or docker"; exit 1; }
   ARGS=""; [ "$NVIDIA" = 1 ] && ARGS="--nvidia"
-  exec sudo "$ENG" run --rm --privileged --network host -v "$PWD":/src -v "$OUT":/src/out docker.io/archlinux/archlinux:latest \
-    bash -c "pacman -Syu --noconfirm --needed archiso && cd /src && OUT=/src/out WORK=/tmp/work ./build.sh $ARGS"
+  sudo mkdir -p "$PKGCACHE"
+  exec sudo "$ENG" run --rm --privileged --network host -v "$PWD":/src -v "$OUT":/src/out \
+    -v "$PKGCACHE":/var/cache/pacman/pkg docker.io/archlinux/archlinux:latest \
+    bash -c "pacman -Syu --noconfirm --needed archiso base-devel && cd /src && OUT=/src/out WORK=/tmp/work ./build.sh $ARGS"
 fi
 
 [ "$(id -u)" = 0 ] || exec sudo -E "$0" "$@"
 
-# Stage a throwaway copy of the profile so the repo is never modified by a build.
+# 1. overlay repo
+REPO_OUT="$OUT/graphite-repo" ./tools/build-repo.sh
+
+# 2. staged profile
 PROFILE=$(mktemp -d); trap 'rm -rf "$PROFILE"' EXIT
-tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite -cf - . | tar -xf - -C "$PROFILE"
-mkdir -p "$PROFILE/airootfs/opt"
-cp -a graphite "$PROFILE/airootfs/opt/graphite"
-# Graphite package lists (single source: graphite/packages/*.txt)
-LISTS=(graphite/packages/desktop.txt graphite/packages/graphics.txt graphite/packages/gaming.txt graphite/packages/dev.txt)
-[ "$NVIDIA" = 1 ] && LISTS+=(graphite/packages/nvidia.txt)
-sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${LISTS[@]}" >> "$PROFILE/packages.x86_64"
-# System assets needed before first login (SDDM theme, wallpaper, CLI on PATH)
+tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite --exclude=./tests --exclude=./tools \
+  -cf - . | tar -xf - -C "$PROFILE"
+printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$OUT/graphite-repo" >> "$PROFILE/pacman.conf"
+{ echo "graphite-config"; echo "graphite-desktop"; echo "graphite-gaming"; echo "graphite-dev"
+  [ "$NVIDIA" = 1 ] && echo "graphite-nvidia"; } >> "$PROFILE/packages.x86_64"
+
+# 3. embed installer tree + repo
 A="$PROFILE/airootfs"
-mkdir -p "$A/usr/local/bin" "$A/usr/share/backgrounds/graphite" "$A/usr/share/sddm/themes"
-for f in graphite/bin/*; do ln -sfn "/opt/graphite/bin/$(basename "$f")" "$A/usr/local/bin/$(basename "$f")"; done
-cp -a graphite/assets/backgrounds/. "$A/usr/share/backgrounds/graphite/"
-cp -a graphite/assets/sddm-theme "$A/usr/share/sddm/themes/graphite"
+mkdir -p "$A/opt"
+cp -a graphite "$A/opt/graphite"
+cp -aL "$OUT/graphite-repo" "$A/opt/graphite-repo"
 # mkarchiso resets airootfs modes to 0644 unless listed in file_permissions, so
 # register every executable in graphite/ (install.sh, bin/*, scripts) as 0755.
 while IFS= read -r f; do

@@ -1,31 +1,37 @@
 #!/usr/bin/env bash
-# Graphite installer: turns an Arch Linux system into Graphite.
-# This tree is the single source of truth for both install paths:
-#   * script on top of Arch:  sudo /opt/graphite/install.sh --user <name>
-#   * ISO: graphite-iso-install runs this inside the freshly installed system,
-#     and the live session runs it with --live (configs only; packages are on the ISO).
+# Graphite installer: turns an Arch Linux system into Graphite using the
+# [graphite] overlay repo (graphite-config + meta-packages). Official Arch repos
+# stay authoritative; [graphite] is listed last and never replaces core packages.
+#   * disk installs: graphite-iso-install runs this inside the new system
+#   * existing Arch: sudo ./install.sh --user <name> --repo /path/to/graphite-repo
+#   * live ISO:      graphite-home.service runs it with --live (user configs only)
 set -Eeuo pipefail
 
 GRAPHITE_PATH=${GRAPHITE_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 export GRAPHITE_PATH
 TARGET_USER=${SUDO_USER:-}
-LIVE=0; PACKAGES=1; NVIDIA=0
+LIVE=0; PACKAGES=1; NVIDIA=0; PROFILE=full; REPO=""
 ORIG_ARGS=("$@")
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--user NAME] [--live] [--no-packages] [--nvidia]
-  --user NAME     user whose ~/.config receives the Graphite configs (default: \$SUDO_USER)
-  --live          live-ISO mode: configs + system assets only, no pacman, no services
-  --no-packages   skip package installation
-  --nvidia        also install the NVIDIA stack (packages/nvidia.txt)
-Runs as root; re-executes itself with sudo when started as a normal user.
+Usage: install.sh [--user NAME] [--profile full|desktop] [--repo DIR] [--nvidia]
+                  [--no-packages] [--live]
+  --user NAME      user whose ~/.config gets the Graphite defaults (default: \$SUDO_USER)
+  --profile        full (desktop + gaming + dev, default) or desktop
+  --repo DIR       local [graphite] repo to add to pacman.conf if not configured
+                   (default: /var/lib/graphite/repo or /opt/graphite-repo if present)
+  --nvidia         also install graphite-nvidia
+  --no-packages    skip pacman (configure only)
+  --live           live-ISO mode: user configs only
 USAGE
 }
 
 while (($#)); do
   case $1 in
-    --user) TARGET_USER=${2:?--user needs a name}; shift 2 ;;
+    --user) TARGET_USER=${2:?}; shift 2 ;;
+    --profile) PROFILE=${2:?}; shift 2 ;;
+    --repo) REPO=${2:?}; shift 2 ;;
     --live) LIVE=1; PACKAGES=0; shift ;;
     --no-packages) PACKAGES=0; shift ;;
     --nvidia) NVIDIA=1; shift ;;
@@ -43,7 +49,7 @@ fi
 [[ -n $TARGET_USER ]] || { echo "error: no target user (use --user NAME)" >&2; exit 1; }
 id "$TARGET_USER" >/dev/null 2>&1 || { echo "error: user '$TARGET_USER' does not exist" >&2; exit 1; }
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
-export TARGET_USER TARGET_HOME LIVE PACKAGES NVIDIA
+export TARGET_USER TARGET_HOME LIVE PACKAGES NVIDIA PROFILE REPO
 
 # shellcheck source=SCRIPTDIR/install/helpers.sh
 source "$GRAPHITE_PATH/install/helpers.sh"
@@ -52,4 +58,4 @@ for phase in preflight packages system config post-install; do
   # shellcheck source=/dev/null
   source "$GRAPHITE_PATH/install/$phase.sh"
 done
-log "Graphite $(cat "$GRAPHITE_PATH/VERSION") installed for $TARGET_USER."
+log "Graphite $(cat "$GRAPHITE_PATH/VERSION") set up for $TARGET_USER."

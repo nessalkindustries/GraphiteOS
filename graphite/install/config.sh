@@ -1,11 +1,13 @@
 # shellcheck shell=bash
-# Deploy default dotfiles into the user's ~/.config. Files the user changed are
-# kept as <file>.bak.<timestamp> before being replaced.
+# Copy the packaged defaults (/etc/skel, from graphite-config) into an existing
+# user's home. Files the user changed are kept as <file>.bak.<timestamp>.
 stamp=$(date +%Y%m%d%H%M%S)
+src_root=/etc/skel/.config
+[[ -d $src_root/hypr ]] || src_root="$GRAPHITE_PATH/config"   # before graphite-config is installed
 cfg="$TARGET_HOME/.config"
 as_user mkdir -p "$cfg"
 while IFS= read -r -d '' src; do
-  rel=${src#"$GRAPHITE_PATH/config/"}
+  rel=${src#"$src_root/"}
   dst="$cfg/$rel"
   as_user mkdir -p "$(dirname "$dst")"
   if [[ -e $dst ]] && [[ $(sha256sum <"$src") != $(sha256sum <"$dst") ]]; then
@@ -14,4 +16,6 @@ while IFS= read -r -d '' src; do
   fi
   as_user cp -f "$src" "$dst"
   if [[ -x $src ]]; then as_user chmod +x "$dst"; fi
-done < <(find "$GRAPHITE_PATH/config" -type f -print0)
+done < <(find "$src_root" -type f -print0)
+# Generate theme-dependent files (~/.config/graphite/current) for the default theme.
+if command -v graphite-theme >/dev/null; then as_user graphite-theme apply || warn "theme apply failed"; fi
