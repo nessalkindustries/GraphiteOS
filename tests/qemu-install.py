@@ -39,6 +39,7 @@ with open(os.path.join(ROOT, "tests", "patch-selftest.sh")) as f:
     open(os.path.join(www, "patch-selftest.sh"), "w").write(f.read().replace("@HOST@", host))
 LIVE_SCRIPT = "patch-selftest.sh" if ("--patch-selftest" in sys.argv and "--keep-disk" in sys.argv) else "autoinstall.sh"
 shutil.copy(os.path.join(ROOT, "tests", "selftest.sh"), www)
+shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite"), os.path.join(www, "graphite-bin"))
 if os.path.isdir("/var/cache/graphite-pkg"):
     os.symlink("/var/cache/graphite-pkg", os.path.join(www, "pkg"))
 class Quiet(http.server.SimpleHTTPRequestHandler):
