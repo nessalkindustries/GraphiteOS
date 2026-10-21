@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the GraphiteOS ISO.
+# Build the Graphite ISO. The ISO embeds ./graphite (the install-script tree) at
+# /opt/graphite and installs its package lists; nothing is duplicated in airootfs.
 #   ./build.sh            -> builds natively if on Arch (needs root + archiso)
 #   ./build.sh --nvidia   -> also include the NVIDIA driver stack
 #   ./build.sh --container-> builds inside a privileged archlinux container (podman or docker)
@@ -7,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 NVIDIA=0; CONTAINER=0
 for a in "$@"; do case $a in --nvidia) NVIDIA=1;; --container) CONTAINER=1;; *) echo "unknown arg $a"; exit 1;; esac; done
-OUT=${OUT:-$PWD/out}; WORK=${WORK:-/tmp/graphiteos-work}
+OUT=${OUT:-$PWD/out}; WORK=${WORK:-/tmp/graphite-work}
 mkdir -p "$OUT"
 
 if [ "$CONTAINER" = 1 ]; then
@@ -17,14 +18,26 @@ if [ "$CONTAINER" = 1 ]; then
     bash -c "pacman -Syu --noconfirm --needed archiso && cd /src && OUT=/src/out WORK=/tmp/work ./build.sh $ARGS"
 fi
 
-PROFILE=$PWD
-if [ "$NVIDIA" = 1 ]; then
-  PROFILE=$(mktemp -d); tar --exclude=./out --exclude=./.git -cf - . | tar -xf - -C "$PROFILE"
-  grep -v '^#' packages.nvidia.x86_64 >> "$PROFILE/packages.x86_64"
-  # distinct ISO name so the NVIDIA build never overwrites the standard ISO
-  sed -i 's/^iso_name=.*/iso_name="graphiteos-nvidia"/' "$PROFILE/profiledef.sh"
-fi
 [ "$(id -u)" = 0 ] || exec sudo -E "$0" "$@"
+
+# Stage a throwaway copy of the profile so the repo is never modified by a build.
+PROFILE=$(mktemp -d); trap 'rm -rf "$PROFILE"' EXIT
+tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite -cf - . | tar -xf - -C "$PROFILE"
+mkdir -p "$PROFILE/airootfs/opt"
+cp -a graphite "$PROFILE/airootfs/opt/graphite"
+# Graphite package lists (single source: graphite/packages/*.txt)
+LISTS=(graphite/packages/desktop.txt graphite/packages/graphics.txt graphite/packages/gaming.txt graphite/packages/dev.txt)
+[ "$NVIDIA" = 1 ] && LISTS+=(graphite/packages/nvidia.txt)
+sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${LISTS[@]}" >> "$PROFILE/packages.x86_64"
+# System assets needed before first login (SDDM theme, wallpaper, CLI on PATH)
+A="$PROFILE/airootfs"
+mkdir -p "$A/usr/local/bin" "$A/usr/share/backgrounds/graphite" "$A/usr/share/sddm/themes"
+for f in graphite/bin/*; do ln -sfn "/opt/graphite/bin/$(basename "$f")" "$A/usr/local/bin/$(basename "$f")"; done
+cp -a graphite/assets/backgrounds/. "$A/usr/share/backgrounds/graphite/"
+cp -a graphite/assets/sddm-theme "$A/usr/share/sddm/themes/graphite"
+# distinct ISO name so the NVIDIA build never overwrites the standard ISO
+[ "$NVIDIA" = 1 ] && sed -i 's/^iso_name=.*/iso_name="graphite-nvidia"/' "$PROFILE/profiledef.sh"
+
 rm -rf "$WORK"
 mkarchiso -v -w "$WORK" -o "$OUT" "$PROFILE"
 ls -lh "$OUT"/*.iso
