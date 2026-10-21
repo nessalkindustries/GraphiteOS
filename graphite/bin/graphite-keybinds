@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Super+K cheatsheet: list Hyprland keybindings from the user's config in rofi
+# (or print them when not in a graphical session). A trailing "# text" comment
+# on a bind line is used as its description.
+set -euo pipefail
+CONF=${1:-$HOME/.config/hypr/hyprland.conf}
+list() {
+  awk '
+    /^[[:space:]]*\$mod[[:space:]]*=/ { split($0, a, "="); gsub(/[[:space:]]/, "", a[2]); mod=a[2] }
+    /^[[:space:]]*bind[a-z]*[[:space:]]*=/ {
+      line=$0; desc=""
+      if (index(line, "#")) { desc=substr(line, index(line, "#")+1); line=substr(line, 1, index(line, "#")-1) }
+      sub(/^[^=]*=[[:space:]]*/, "", line)
+      n=split(line, f, ",")
+      for (i=1;i<=n;i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", f[i])
+      mods=f[1]; gsub(/\$mod/, mod, mods); gsub(/ /, " + ", mods)
+      key=(mods=="" ? f[2] : mods " + " f[2])
+      act=f[3]; for (i=4;i<=n;i++) act=act " " f[i]
+      gsub(/mouse:272/, "Left mouse", key); gsub(/mouse:273/, "Right mouse", key)
+      if (desc != "") act=desc
+      printf "%-28s %s\n", key, act
+    }' "$CONF"
+}
+if [[ -n ${WAYLAND_DISPLAY:-} ]] && command -v rofi >/dev/null; then
+  list | rofi -dmenu -i -p "Keybindings" -no-custom >/dev/null || true
+else
+  list
+fi

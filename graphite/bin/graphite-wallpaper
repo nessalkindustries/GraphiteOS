@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Start the wallpaper. hyprpaper needs GPU buffer allocation; in VMs with only
-# software rendering (llvmpipe) it crashes, so fall back to swaybg (wl_shm, no GL).
-# On real hardware hyprpaper keeps running and swaybg is never started.
-WP=/usr/share/backgrounds/graphite/graphite.png
-hyprpaper && exit 0
+# Start the wallpaper for the active theme. hyprpaper needs GPU buffer
+# allocation; in VMs with only software rendering it can crash, so fall back
+# to swaybg (wl_shm, no GL). On real hardware hyprpaper keeps running.
+WP=$(cat "$HOME/.config/graphite/current/wallpaper" 2>/dev/null)
+[[ -f $WP ]] || WP=/usr/share/backgrounds/graphite/graphite.png
+# hyprpaper >= 0.8 block syntax (same as ~/.config/hypr/hyprpaper.conf)
+printf 'splash = false\nipc = true\n\nwallpaper {\n    monitor =\n    path = %s\n    fit_mode = cover\n}\n' "$WP" \
+  > "${XDG_RUNTIME_DIR:-/tmp}/graphite-hyprpaper.conf"
+hyprpaper -c "${XDG_RUNTIME_DIR:-/tmp}/graphite-hyprpaper.conf" && exit 0
 exec swaybg -m fill -i "$WP"

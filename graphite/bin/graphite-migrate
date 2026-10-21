@@ -4,7 +4,7 @@
 # `bash -euo pipefail`. They must be idempotent and start with an `echo` line that
 # says what they do. Completion markers: ~/.local/state/graphite/migrations/<name>.
 set -euo pipefail
-GRAPHITE_PATH=${GRAPHITE_PATH:-/opt/graphite}
+GRAPHITE_PATH=${GRAPHITE_PATH:-/usr/share/graphite}
 MIGRATIONS_DIR="$GRAPHITE_PATH/migrations"
 STATE_DIR=${GRAPHITE_MIGRATION_STATE:-$HOME/.local/state/graphite/migrations}
 

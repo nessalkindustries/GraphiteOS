@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Graphite theme engine. A theme is a directory with colors.toml (flat
+# `key = "value"` pairs). Applying renders $GRAPHITE_PATH/templates/*.tpl into
+# ~/.config/graphite/current/ ({{key}} -> value, {{key.hex}} -> value without '#').
+# mako has no include support, so ~/.config/mako/config is owned by the theme.
+# Usage: graphite-theme list | current | set NAME | apply
+set -euo pipefail
+GRAPHITE_PATH=${GRAPHITE_PATH:-/usr/share/graphite}
+USER_THEMES="$HOME/.config/graphite/themes"   # user themes override shipped ones
+STATE="$HOME/.config/graphite"
+OUT="$STATE/current"
+
+theme_dir() {
+  local d
+  for d in "$USER_THEMES/$1" "$GRAPHITE_PATH/themes/$1"; do
+    [[ -f $d/colors.toml ]] && { echo "$d"; return 0; }
+  done
+  return 1
+}
+current() { cat "$STATE/theme" 2>/dev/null || echo graphite-teal; }
+
+render() {
+  local dir=$1 tpl key val sedargs=()
+  while IFS= read -r line; do
+    [[ $line =~ ^[[:space:]]*([a-z_]+)[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]] || continue
+    key=${BASH_REMATCH[1]}; val=${BASH_REMATCH[2]}
+    sedargs+=(-e "s|{{$key}}|$val|g" -e "s|{{$key.hex}}|${val#\#}|g")
+  done < "$dir/colors.toml"
+  mkdir -p "$OUT"
+  for tpl in "$GRAPHITE_PATH"/templates/*.tpl; do
+    sed "${sedargs[@]}" "$tpl" > "$OUT/$(basename "${tpl%.tpl}")"
+  done
+  mkdir -p "$HOME/.config/mako"
+  mv -f "$OUT/mako.config" "$HOME/.config/mako/config"
+  local wp
+  wp=$(sed -n 's/^wallpaper *= *"\(.*\)"/\1/p' "$dir/colors.toml")
+  if [[ -n $wp ]]; then
+    [[ $wp == /* ]] || wp="/usr/share/backgrounds/graphite/$wp"
+    [[ -f $dir/$(basename "$wp") ]] && wp="$dir/$(basename "$wp")"
+    echo "$wp" > "$OUT/wallpaper"
+  fi
+}
+
+reload_desktop() {
+  [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] || return 0
+  hyprctl reload >/dev/null 2>&1 || true
+  pkill -SIGUSR2 -x waybar 2>/dev/null || true      # waybar reloads its CSS
+  makoctl reload 2>/dev/null || true
+  pkill -SIGUSR1 -x kitty 2>/dev/null || true       # kitty reloads its config
+}
+
+case ${1:-current} in
+  list)
+    { ls "$GRAPHITE_PATH/themes"; ls "$USER_THEMES" 2>/dev/null || true; } | sort -u | while read -r t; do
+      [[ $t == "$(current)" ]] && echo "* $t" || echo "  $t"
+    done ;;
+  current) current ;;
+  set)
+    name=${2:?usage: graphite-theme set NAME}
+    dir=$(theme_dir "$name") || { echo "unknown theme: $name" >&2; exit 1; }
+    mkdir -p "$STATE"; echo "$name" > "$STATE/theme"
+    render "$dir"; reload_desktop; echo "theme: $name" ;;
+  apply)
+    dir=$(theme_dir "$(current)") || dir=$(theme_dir graphite-teal)
+    render "$dir"; reload_desktop ;;
+  *) echo "usage: graphite-theme list|current|set NAME|apply" >&2; exit 1 ;;
+esac

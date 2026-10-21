@@ -1,5 +1,4 @@
-# Graphite Teal (default theme). Phase 1: reference palette only.
-# Phase 2 will render config templates from this file (see docs/STRUCTURE.md).
+# Graphite theme palette. `graphite theme set <dir>` renders templates/*.tpl with these values.
 name = "Graphite Teal"
 background = "#1c1d20"
 surface    = "#2a2c30"
