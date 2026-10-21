@@ -19,24 +19,24 @@ if curl -fsS "@HOST@/override/hyprland.conf" -o /tmp/hl.conf 2>/dev/null; then
   install -o $U -m644 /tmp/hl.conf /home/$U/.config/hypr/hyprland.conf && echo "RICE: using host hyprland.conf override"
   sleep 5; H hyprctl reload >/dev/null 2>&1
 fi
-sleep 25   # let waybar/wallpaper/mako settle (software rendering is slow)
+sleep 60   # let waybar/wallpaper/mako settle (software rendering is slow)
 echo "RICE: configerrors: $(H hyprctl configerrors 2>&1 | tr '\n' ' ')"
 echo "RICE: layers: $(H hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | sort -u | tr '\n' ' ')"
 echo "RICE: theme=$(H graphite-theme current) fonts: $(fc-list : family | grep -ciE 'inter|jetbrains') inter/jbm faces"
 H notify-send -a Graphite "Welcome to Graphite" "Super+Space apps · Super+K keys · Super+T themes" || true
-sleep 4; shot desktop
+sleep 20; shot desktop
 H notify-send -a Graphite -t 1 x >/dev/null 2>&1; H makoctl dismiss -a 2>/dev/null
-H rofi -show drun & sleep 8; shot launcher; pkill -x rofi
-H graphite-menu power & sleep 6; shot menu-power 10; pkill -x rofi
-H graphite-keybinds & sleep 6; shot keybinds 10; pkill -x rofi
-H hyprctl dispatch exec "kitty --hold fastfetch" >/dev/null; sleep 10
-H hyprctl dispatch exec "kitty --hold fastfetch" >/dev/null; sleep 12
-H hyprctl dispatch exec "kitty" >/dev/null; sleep 10
+H rofi -show drun & sleep 25; shot launcher; pkill -x rofi; sleep 8
+H graphite-menu power & sleep 20; shot menu-power 10; pkill -x rofi; sleep 8
+H graphite-keybinds & sleep 20; shot keybinds 10; pkill -x rofi; sleep 8
+H hyprctl dispatch exec "kitty --hold fastfetch" >/dev/null; sleep 25
+H hyprctl dispatch exec "kitty --hold fastfetch" >/dev/null; sleep 25
+H hyprctl dispatch exec "kitty" >/dev/null; sleep 30
 shot terminals 12
 for t in graphite-nord graphite-mocha graphite-light graphite-amber graphite-violet graphite-teal; do
-  H graphite-theme set "$t"; sleep 14
+  H graphite-theme set "$t"; sleep 45
   shot "theme-$t" 10
 done
-H rofi -show drun & sleep 8; shot launcher-teal 8; pkill -x rofi
-H hyprlock & sleep 14; shot lock 10
+H rofi -show drun & sleep 25; shot launcher-teal 8; pkill -x rofi; sleep 8
+H hyprlock & sleep 40; shot lock 10
 echo "RICE: DONE"

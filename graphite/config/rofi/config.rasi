@@ -37,7 +37,9 @@ listview { lines: 7; columns: 1; fixed-height: true; scrollbar: false; spacing: 
 element { padding: 8px 12px; border-radius: 10px; spacing: 12px; }
 element-icon { size: 24px; vertical-align: 0.5; }
 element-text { vertical-align: 0.5; text-color: inherit; }
-element normal.normal, element alternate.normal { background-color: transparent; }
+element normal.normal, element alternate.normal { background-color: transparent; text-color: @fg; }
+element normal.active, element alternate.active { background-color: transparent; text-color: @accent; }
+element selected.active { background-color: @overlay; text-color: @accent; }
 element selected.normal { background-color: @overlay; text-color: @accent; }
 mode-switcher { spacing: 6px; }
 button { padding: 6px; border-radius: 10px; text-color: @muted; }

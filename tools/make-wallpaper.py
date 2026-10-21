@@ -54,7 +54,7 @@ def render(theme_dir):
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
     except OSError:
         font = ImageFont.load_default()
-    ImageDraw.Draw(img).text((96, H - 130), "graphite", font=font, fill=mix(bg, fg, 0.38))
+    ImageDraw.Draw(img).text((300, H - 150), "graphite", font=font, fill=mix(bg, fg, 0.38))
     os.makedirs(OUT, exist_ok=True)
     out = os.path.join(OUT, f"{name}.png"); img.save(out, optimize=True); print(out)
     if name == "graphite-teal":

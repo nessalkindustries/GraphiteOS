@@ -13,9 +13,7 @@
 
   "custom/logo": { "format": "󰣇", "tooltip-format": "Apps (Super+Space)", "on-click": "rofi -show drun" },
   "hyprland/workspaces": {
-    "format": "{icon}",
-    "format-icons": { "active": "", "default": "", "empty": "" },
-    "persistent-workspaces": { "*": 4 },
+    "format": "{id}",
     "on-scroll-up": "hyprctl dispatch workspace e-1",
     "on-scroll-down": "hyprctl dispatch workspace e+1"
   },
