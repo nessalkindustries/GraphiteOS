@@ -2,3 +2,4 @@ out/
 work/
 *.iso
 split/
+__pycache__/
