@@ -1,34 +1,173 @@
 #!/usr/bin/env bash
-# Install Graphite from the live ISO:
-#   1. archinstall (disk, bootloader, user)  2. copy /opt/graphite into the new
-#   system  3. run install.sh inside it for the created user.
-# Usage: sudo graphite-iso-install [--target /mnt] [--skip-archinstall] [--nvidia]
-set -euo pipefail
-TARGET=/mnt; RUN_ARCHINSTALL=1; EXTRA=()
+# Graphite disk installer (run from the live ISO as root). Layout:
+#   GPT: ESP 1 GiB (FAT32, mounted at /boot, holds kernels + GRUB)
+#        LUKS2 (argon2id) -> Btrfs subvolumes @ @home @log @pkg @snapshots
+# Bootloader: GRUB (UEFI) + grub-btrfs for bootable Snapper snapshots.
+# Interactive by default; fully unattended with --yes and all values given.
+#
+# Usage: graphite-iso-install --disk /dev/vda --user NAME [--password PW]
+#          [--luks-pass PW] [--hostname graphite] [--timezone Area/City]
+#          [--locale en_US.UTF-8] [--keymap us] [--profile full|desktop]
+#          [--nvidia] [--serial-console] [--selftest FILE] [--yes]
+set -Eeuo pipefail
+DISK=""; USERNAME=""; PASSWORD=""; LUKS_PASS=""; HOSTNAME_="graphite"
+TZ_="UTC"; LOCALE="en_US.UTF-8"; KEYMAP="us"; PROFILE="full"; NVIDIA=0
+SERIAL=0; SELFTEST=""; YES=0
+GRAPHITE_SRC=${GRAPHITE_SRC:-/opt/graphite}
+REPO_SRC=${REPO_SRC:-/opt/graphite-repo}
+MNT=/mnt
+
+die() { echo "graphite-iso-install: error: $*" >&2; exit 1; }
+log() { printf '\e[38;2;94;234;212m==>\e[0m %s\n' "$*"; }
+
 while (($#)); do
   case $1 in
-    --target) TARGET=${2:?}; shift 2 ;;
-    --skip-archinstall) RUN_ARCHINSTALL=0; shift ;;
-    --nvidia) EXTRA+=(--nvidia); shift ;;
-    *) echo "unknown option: $1" >&2; exit 1 ;;
+    --disk) DISK=$2; shift 2 ;;
+    --user) USERNAME=$2; shift 2 ;;
+    --password) PASSWORD=$2; shift 2 ;;
+    --luks-pass) LUKS_PASS=$2; shift 2 ;;
+    --hostname) HOSTNAME_=$2; shift 2 ;;
+    --timezone) TZ_=$2; shift 2 ;;
+    --locale) LOCALE=$2; shift 2 ;;
+    --keymap) KEYMAP=$2; shift 2 ;;
+    --profile) PROFILE=$2; shift 2 ;;
+    --nvidia) NVIDIA=1; shift ;;
+    --serial-console) SERIAL=1; shift ;;
+    --selftest) SELFTEST=$2; shift 2 ;;
+    --yes) YES=1; shift ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    *) die "unknown option $1" ;;
   esac
 done
 [[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+[[ -d /sys/firmware/efi ]] || die "UEFI boot required (boot the ISO in UEFI mode)"
+[[ $PROFILE == full || $PROFILE == desktop ]] || die "--profile must be full or desktop"
 
-if ((RUN_ARCHINSTALL)); then
-  echo "Starting archinstall. Create a user account and leave the target mounted"
-  echo "(answer 'no' to the final chroot prompt). Graphite is applied afterwards."
-  archinstall --mount-point "$TARGET" || { echo "archinstall failed" >&2; exit 1; }
-fi
-mountpoint -q "$TARGET" || {
-  echo "error: $TARGET is not mounted. Mount the new root there and re-run with --skip-archinstall." >&2
-  exit 1
+ask() { local v; read -r -p "$1: " v; printf '%s' "$v"; }
+ask_secret() {
+  local a b
+  while :; do
+    read -r -s -p "$1: " a; echo >&2; read -r -s -p "Repeat: " b; echo >&2
+    [[ -n $a && $a == "$b" ]] && { printf '%s' "$a"; return; }
+    echo "Empty or not matching, try again." >&2
+  done
 }
-user=$(awk -F: '$3>=1000 && $3<60000 {print $1; exit}' "$TARGET/etc/passwd")
-[[ -n $user ]] || { echo "error: no regular user in $TARGET/etc/passwd; create one first." >&2; exit 1; }
+if [[ -z $DISK ]]; then lsblk -dpno NAME,SIZE,MODEL | grep -v -e loop -e sr; DISK=$(ask "Target disk (ERASED)"); fi
+[[ -n $USERNAME ]] || USERNAME=$(ask "Username")
+[[ -n $PASSWORD ]] || PASSWORD=$(ask_secret "Password for $USERNAME")
+[[ -n $LUKS_PASS ]] || LUKS_PASS=$(ask_secret "Disk encryption passphrase (needed at every boot; write it down)")
+[[ -b $DISK ]] || die "$DISK is not a block device"
+[[ $USERNAME =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid username"
+[[ -e /usr/share/zoneinfo/$TZ_ ]] || die "unknown timezone $TZ_"
+if ((! YES)); then
+  read -r -p "ALL DATA ON $DISK WILL BE ERASED. Type 'yes' to continue: " c
+  [[ $c == yes ]] || die "aborted"
+fi
 
-echo "Copying Graphite into $TARGET/opt/graphite"
-rm -rf "$TARGET/opt/graphite"; mkdir -p "$TARGET/opt"
-cp -a /opt/graphite "$TARGET/opt/graphite"
-arch-chroot "$TARGET" /opt/graphite/install.sh --user "$user" "${EXTRA[@]}"
-echo "Done. Reboot into Graphite and log in as $user."
+log "Partitioning $DISK"
+umount -R "$MNT" 2>/dev/null || true
+cryptsetup close cryptroot 2>/dev/null || true
+wipefs -af "$DISK"
+sgdisk -Z "$DISK" >/dev/null
+sgdisk -n1:0:+1G -t1:ef00 -c1:EFI -n2:0:0 -t2:8309 -c2:GraphiteRoot "$DISK" >/dev/null
+partprobe "$DISK"; udevadm settle
+part() { lsblk -lnpo NAME,PARTN "$DISK" | awk -v n="$1" '$2==n{print $1}'; }
+ESP=$(part 1); ROOT=$(part 2)
+[[ -b $ESP && -b $ROOT ]] || die "partitions not found"
+
+log "LUKS2 on $ROOT"
+printf '%s' "$LUKS_PASS" | cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file - "$ROOT"
+printf '%s' "$LUKS_PASS" | cryptsetup open --key-file - "$ROOT" cryptroot
+LUKS_UUID=$(blkid -s UUID -o value "$ROOT")
+
+log "Btrfs + subvolumes"
+mkfs.fat -F32 -n EFI "$ESP" >/dev/null
+mkfs.btrfs -f -L graphite /dev/mapper/cryptroot >/dev/null
+mount /dev/mapper/cryptroot "$MNT"
+for sv in @ @home @log @pkg @snapshots; do btrfs subvolume create "$MNT/$sv" >/dev/null; done
+umount "$MNT"
+OPTS=compress=zstd:1,noatime
+mount -o "$OPTS,subvol=@" /dev/mapper/cryptroot "$MNT"
+mkdir -p "$MNT"/{boot,home,var/log,var/cache/pacman/pkg,.snapshots}
+mount -o "$OPTS,subvol=@home" /dev/mapper/cryptroot "$MNT/home"
+mount -o "$OPTS,subvol=@log" /dev/mapper/cryptroot "$MNT/var/log"
+mount -o "$OPTS,subvol=@pkg" /dev/mapper/cryptroot "$MNT/var/cache/pacman/pkg"
+mount -o "$OPTS,subvol=@snapshots" /dev/mapper/cryptroot "$MNT/.snapshots"
+mount -o umask=0077 "$ESP" "$MNT/boot"
+
+log "Base system (pacstrap)"
+# pacman.conf for the target: Arch defaults + [multilib] + local [graphite] overlay
+# (listed LAST so it can never shadow an official package).
+CONF=$(mktemp)
+sed '/^\[graphite\]/,/^$/d' /etc/pacman.conf > "$CONF"
+grep -q '^\[multilib\]' "$CONF" || printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> "$CONF"
+printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$REPO_SRC" >> "$CONF"
+[[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[options\]/a CacheServer = $GRAPHITE_CACHE_SERVER" "$CONF"
+pacstrap -C "$CONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
+  btrfs-progs cryptsetup grub efibootmgr sudo networkmanager nano vim man-db
+
+log "Configuring target"
+genfstab -U "$MNT" >> "$MNT/etc/fstab"
+install -d "$MNT/var/lib/graphite"
+cp -a "$REPO_SRC" "$MNT/var/lib/graphite/repo"
+cp -a "$GRAPHITE_SRC" "$MNT/var/lib/graphite/src"
+sed -e "s#file://$REPO_SRC#file:///var/lib/graphite/repo#" -e '/^CacheServer/d' "$CONF" > "$MNT/etc/pacman.conf"
+[[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[options\]/a CacheServer = $GRAPHITE_CACHE_SERVER" "$MNT/etc/pacman.conf"
+ln -sf "/usr/share/zoneinfo/$TZ_" "$MNT/etc/localtime"
+echo "$HOSTNAME_" > "$MNT/etc/hostname"
+sed -i "s/^#\($LOCALE .*\)/\1/" "$MNT/etc/locale.gen"; grep -q "^en_US.UTF-8" "$MNT/etc/locale.gen" || sed -i 's/^#\(en_US.UTF-8 .*\)/\1/' "$MNT/etc/locale.gen"
+echo "LANG=$LOCALE" > "$MNT/etc/locale.conf"
+echo "KEYMAP=$KEYMAP" > "$MNT/etc/vconsole.conf"
+# busybox initramfs with the `encrypt` hook: compatible with grub-btrfs-overlayfs
+# (writable overlay when booting a read-only snapshot).
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck grub-btrfs-overlayfs)/' "$MNT/etc/mkinitcpio.conf"
+
+CMDLINE="cryptdevice=UUID=$LUKS_UUID:cryptroot root=/dev/mapper/cryptroot rootflags=subvol=@ quiet"
+((SERIAL)) && CMDLINE="${CMDLINE/ quiet/} console=tty0 console=ttyS0,115200"
+sed -i -e "s#^GRUB_CMDLINE_LINUX_DEFAULT=.*#GRUB_CMDLINE_LINUX_DEFAULT=\"$CMDLINE\"#" \
+       -e 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' -e 's/^#\?GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=false/' \
+       -e 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Graphite"/' -e 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' "$MNT/etc/default/grub"
+grep -q '^GRUB_DISABLE_SUBMENU' "$MNT/etc/default/grub" || echo 'GRUB_DISABLE_SUBMENU=y' >> "$MNT/etc/default/grub"
+if ((SERIAL)); then
+  printf 'GRUB_TERMINAL="console serial"\nGRUB_SERIAL_COMMAND="serial --speed=115200"\n' >> "$MNT/etc/default/grub"
+fi
+
+ARGS=(--user "$USERNAME" --profile "$PROFILE")
+((NVIDIA)) && ARGS+=(--nvidia)
+arch-chroot "$MNT" useradd -m -G wheel -s /bin/bash "$USERNAME"
+printf '%s:%s\n' "$USERNAME" "$PASSWORD" | arch-chroot "$MNT" chpasswd
+arch-chroot "$MNT" passwd -l root >/dev/null
+arch-chroot "$MNT" locale-gen >/dev/null
+arch-chroot "$MNT" systemctl enable NetworkManager.service >/dev/null
+GRAPHITE_PATH=/var/lib/graphite/src arch-chroot "$MNT" /var/lib/graphite/src/install.sh "${ARGS[@]}"
+
+log "Bootloader (GRUB, UEFI, removable path + NVRAM entry)"
+arch-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Graphite >/dev/null 2>&1 \
+  || echo "note: NVRAM entry not written (fine in VMs); removable path is used"
+arch-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --removable >/dev/null
+arch-chroot "$MNT" mkinitcpio -P >/dev/null
+arch-chroot "$MNT" grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
+
+if [[ -n $SELFTEST ]]; then
+  log "Installing self-test hook (testing only)"
+  install -Dm755 "$SELFTEST" "$MNT/usr/local/sbin/graphite-selftest"
+  cat > "$MNT/etc/systemd/system/graphite-selftest.service" <<UNIT
+[Unit]
+Description=Graphite self-test (QEMU harness only)
+After=network-online.target multi-user.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+Environment=SELFTEST_USER=$USERNAME
+ExecStart=/usr/local/sbin/graphite-selftest
+StandardOutput=journal+console
+StandardError=journal+console
+[Install]
+WantedBy=multi-user.target
+UNIT
+  arch-chroot "$MNT" systemctl enable graphite-selftest.service >/dev/null
+fi
+
+sync; umount -R "$MNT"; cryptsetup close cryptroot
+log "Graphite installed on $DISK. Remove the ISO and reboot."
+echo "GRAPHITE-INSTALL: OK"
