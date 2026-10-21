@@ -40,6 +40,8 @@ package() {
   install -Dm644 "$src/system/usr/lib/systemd/system/graphite-firewall.service" \
     "$pkgdir/usr/lib/systemd/system/graphite-firewall.service"
   install -Dm644 "$src/system/graphite-release" "$pkgdir/usr/lib/graphite-release"
+  install -Dm644 "$src/system/usr/lib/tmpfiles.d/00-graphite-os-release.conf" \
+    "$pkgdir/usr/lib/tmpfiles.d/00-graphite-os-release.conf"
   find "$share" "$pkgdir/etc/skel" -type f -name '*.sh' -exec chmod 755 {} +
   chmod 755 "$share"/bin/* "$share/install.sh"
   chmod 750 "$pkgdir/etc/sudoers.d"

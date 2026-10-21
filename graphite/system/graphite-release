@@ -4,3 +4,5 @@ ID=graphite
 ID_LIKE=arch
 ANSI_COLOR="38;2;94;234;212"
 HOME_URL="https://github.com/Skeleten80/GraphiteOS"
+BUILD_ID=rolling
+LOGO=archlinux-logo

@@ -42,6 +42,8 @@ common_checks() {
   check "[graphite] repo listed after official repos" '[[ $(grep -n "^\[graphite\]" /etc/pacman.conf | cut -d: -f1) -gt $(grep -n "^\[extra\]" /etc/pacman.conf | cut -d: -f1) ]]'
   check "graphite-config owns skel + drop-ins" 'pacman -Qo /etc/skel/.config/hypr/hyprland.conf /etc/sysctl.d/90-graphite.conf | grep -q graphite-config'
   check "user theme files generated" "test -f /home/$U/.config/graphite/current/hyprland.conf"
+  check "os-release says Graphite (ID=graphite, ID_LIKE=arch)" '( . /etc/os-release; [[ $ID == graphite && $ID_LIKE == arch ]] )'
+  check "filesystem package files intact (pacman -Qk)" 'pacman -Qk filesystem'
   check "portals installed" 'pacman -Q xdg-desktop-portal-hyprland xdg-desktop-portal-gtk'
 }
 
@@ -49,6 +51,7 @@ case $stage in
 1)
   say "STAGE1 begin (fresh install, first boot)"
   common_checks
+  say "diag: enable sddm on the booted system -> $(systemctl enable sddm.service 2>&1 | tr '\n' ' ') rc=${PIPESTATUS[0]}"
   check "snapper root config" 'snapper -c root list'
   say "running full pacman -Syu"
   if pacman -Syu --noconfirm > "$ST/syu.log" 2>&1; then say "ok   pacman -Syu"; else say "FAIL pacman -Syu"; tail -20 "$ST/syu.log"; fails=$((fails+1)); fi

@@ -14,6 +14,7 @@ install -m755 /tmp/graphite-bin /mnt/usr/share/graphite/bin/graphite
 rm -rf /mnt/home/.graphite-selftest
 mount /dev/vda1 /mnt/boot
 # diagnose + apply the per-unit enable fix from install/system.sh on this disk
+arch-chroot /mnt systemctl enable graphite-selftest.service  # stage 4 disables it
 for u in sddm.service graphite-firewall.service power-profiles-daemon.service; do
   arch-chroot /mnt systemctl enable "$u" > /tmp/en.log 2>&1 || echo "PATCH: enable $u failed"
   sed "s/^/PATCH: $u: /" /tmp/en.log
