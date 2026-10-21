@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Headless boot test. Usage: ./test-qemu.sh [bios|uefi] [seconds] [iso]
+# shellcheck disable=SC2012,SC2054  # ls|head picks newest file; qemu args legitimately contain commas
 # Uses virtio-vga so Hyprland can render via Mesa llvmpipe (no host GPU needed).
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 MODE=${1:-bios}; SECS=${2:-240}
 ISO=${3:-$(ls -t out/*.iso | head -1)}
 TAG=$(basename "$ISO" .iso)
@@ -18,9 +19,9 @@ fi
 ACCEL=(-accel tcg,thread=multi -cpu max); [ "${USE_KVM:-0}" = 1 ] && ACCEL=(-enable-kvm -cpu host)
 timeout "$SECS" qemu-system-x86_64 "${ACCEL[@]}" -m 4096 -smp 4 "${FW[@]}" \
   -cdrom "$ISO" -boot d -display none -vga none -device virtio-vga -serial stdio \
-  -monitor unix:out/mon-$MODE-$TAG.sock,server,nowait -nic user,model=virtio-net-pci < /dev/null > "$LOG" 2>&1 &
+  -monitor unix:"out/mon-$MODE-$TAG.sock",server,nowait -nic user,model=virtio-net-pci < /dev/null > "$LOG" 2>&1 &
 PID=$!
 sleep $((SECS-15)); python3 -c "import socket,time;s=socket.socket(socket.AF_UNIX);s.connect('out/mon-$MODE-$TAG.sock');s.send(b'screendump out/screen-$MODE-$TAG.ppm\\n');time.sleep(2)" || true
 wait $PID
-python3 -c "from PIL import Image;Image.open('out/screen-$MODE-$TAG.ppm').save('out/screen-$MODE-$TAG.png')" 2>/dev/null && rm -f out/screen-$MODE-$TAG.ppm
+python3 -c "from PIL import Image;Image.open('out/screen-$MODE-$TAG.ppm').save('out/screen-$MODE-$TAG.png')" 2>/dev/null && rm -f "out/screen-$MODE-$TAG.ppm"
 grep -E "Reached target|login:|sddm|Welcome to" "$LOG" | tail -20
