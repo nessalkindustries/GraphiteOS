@@ -1,7 +1,0 @@
-* { font-family: "JetBrainsMono Nerd Font"; font-size: 13px; }
-window#waybar { background: rgba(28,29,32,0.92); color: #d4d6da; border-bottom: 2px solid #2a2c30; }
-#workspaces button { color: #8a8d93; padding: 0 8px; }
-#workspaces button.active { color: #1c1d20; background: #5eead4; border-radius: 6px; }
-#custom-logo { color: #5eead4; padding: 0 12px; font-weight: bold; }
-#clock, #cpu, #memory, #pulseaudio, #network, #battery, #tray, #custom-gamemode { padding: 0 10px; }
-#custom-gamemode { color: #5eead4; }

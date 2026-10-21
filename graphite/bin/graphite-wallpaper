@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Start the wallpaper. hyprpaper needs GPU buffer allocation; in VMs with only
+# software rendering (llvmpipe) it crashes, so fall back to swaybg (wl_shm, no GL).
+# On real hardware hyprpaper keeps running and swaybg is never started.
+WP=/usr/share/backgrounds/graphite/graphite.png
+hyprpaper && exit 0
+exec swaybg -m fill -i "$WP"

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Graphite command center.
+set -euo pipefail
+GRAPHITE_PATH=${GRAPHITE_PATH:-/opt/graphite}
+export GRAPHITE_PATH
+
+help() {
+  cat <<HELP
+Graphite command center ($(cat "$GRAPHITE_PATH/VERSION" 2>/dev/null || echo dev))
+
+Usage: graphite <command> [args]
+  update [--no-packages]   update Graphite code (stub), system packages, then run migrations
+  migrate [--pending]      run (or list) pending migrations for this user
+  install [args]           (re)run the installer: sudo-wraps $GRAPHITE_PATH/install.sh
+  theme list|current       list themes / show the active theme
+  keybinds                 print Hyprland keybindings
+  version                  print the Graphite version
+  debug                    print system info useful for bug reports
+HELP
+}
+
+update() {
+  local packages=1
+  [[ ${1:-} == --no-packages ]] && packages=0
+  # Code update. The repo is private, so the ISO ships the code at $GRAPHITE_PATH.
+  # When a public (or token-reachable) remote exists, set GRAPHITE_REMOTE_UPDATES=1
+  # and this becomes: git -C "$GRAPHITE_PATH" pull --ff-only (or a pacman package).
+  if [[ ${GRAPHITE_REMOTE_UPDATES:-0} == 1 && -d $GRAPHITE_PATH/.git ]]; then
+    sudo git -C "$GRAPHITE_PATH" pull --ff-only
+  else
+    echo "Code update: skipped (no remote yet; Graphite code comes from the ISO)."
+  fi
+  if ((packages)); then sudo pacman -Syu; fi
+  graphite-migrate
+}
+
+theme() {
+  case ${1:-list} in
+    list) for d in "$GRAPHITE_PATH"/themes/*/; do basename "$d"; done ;;
+    current) echo "graphite-teal" ;;  # phase 2: theme switching via colors.toml templates
+    *) echo "usage: graphite theme list|current" >&2; return 1 ;;
+  esac
+}
+
+cmd=${1:-help}; shift || true
+case $cmd in
+  update) update "$@" ;;
+  migrate) graphite-migrate "$@" ;;
+  install) exec "$GRAPHITE_PATH/install.sh" "$@" ;;
+  theme) theme "$@" ;;
+  keybinds) grep -E '^\s*bind[mel]* *=' "$HOME/.config/hypr/hyprland.conf" | sed 's/^\s*bind[mel]* *= *//' ;;
+  version) cat "$GRAPHITE_PATH/VERSION" ;;
+  debug)
+    echo "graphite: $(cat "$GRAPHITE_PATH/VERSION") at $GRAPHITE_PATH"
+    uname -a
+    grep -E '^(PRETTY_NAME|ID)=' /etc/os-release || true
+    echo "pending migrations:"; graphite-migrate --pending || echo "  none"
+    if command -v hyprctl >/dev/null; then hyprctl version 2>/dev/null | head -1; fi ;;
+  help|-h|--help) help ;;
+  *) echo "unknown command: $cmd" >&2; help >&2; exit 1 ;;
+esac

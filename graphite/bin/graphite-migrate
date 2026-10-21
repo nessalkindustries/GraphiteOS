@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Run pending Graphite migrations once per user.
+# Migrations: $GRAPHITE_PATH/migrations/<unix-timestamp>.sh, run in name order with
+# `bash -euo pipefail`. They must be idempotent and start with an `echo` line that
+# says what they do. Completion markers: ~/.local/state/graphite/migrations/<name>.
+set -euo pipefail
+GRAPHITE_PATH=${GRAPHITE_PATH:-/opt/graphite}
+MIGRATIONS_DIR="$GRAPHITE_PATH/migrations"
+STATE_DIR=${GRAPHITE_MIGRATION_STATE:-$HOME/.local/state/graphite/migrations}
+
+usage() { echo "Usage: graphite-migrate [--pending | --mark-all-done]"; }
+
+pending() {
+  local f
+  for f in "$MIGRATIONS_DIR"/*.sh; do
+    [[ -f $f ]] || continue
+    [[ -f $STATE_DIR/$(basename "$f") ]] || basename "$f"
+  done
+}
+
+case ${1:-run} in
+  --pending)
+    out=$(pending); [[ -n $out ]] && { echo "$out"; exit 0; }; exit 1 ;;
+  --mark-all-done)
+    mkdir -p "$STATE_DIR"
+    for f in "$MIGRATIONS_DIR"/*.sh; do [[ -f $f ]] && touch "$STATE_DIR/$(basename "$f")"; done
+    exit 0 ;;
+  run) ;;
+  -h|--help) usage; exit 0 ;;
+  *) usage >&2; exit 1 ;;
+esac
+
+if [[ -e /var/lib/pacman/db.lck ]]; then
+  echo "pacman is busy; run 'graphite migrate' again when it finishes." >&2; exit 1
+fi
+mkdir -p "$STATE_DIR"
+count=0
+while IFS= read -r name; do
+  [[ -n $name ]] || continue
+  printf '\e[38;2;94;234;212m==> migration %s\e[0m\n' "${name%.sh}"
+  GRAPHITE_PATH="$GRAPHITE_PATH" bash -euo pipefail "$MIGRATIONS_DIR/$name"
+  touch "$STATE_DIR/$name"
+  count=$((count + 1))
+done < <(pending)
+echo "$count migration(s) applied."

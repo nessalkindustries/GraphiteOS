@@ -1,5 +1,5 @@
 [Unit]
-Description=GraphiteOS: provide a render node for software rendering in VMs without one (bochs/std VGA, QXL)
+Description=Graphite: provide a render node for software rendering in VMs without one (bochs/std VGA, QXL)
 # Only in virtual machines, and only if no GPU render node exists. Real hardware is never touched.
 ConditionVirtualization=vm
 Before=display-manager.service

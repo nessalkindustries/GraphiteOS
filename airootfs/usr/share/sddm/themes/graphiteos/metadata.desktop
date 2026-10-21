@@ -1,8 +1,0 @@
-[SddmGreeterTheme]
-Name=GraphiteOS
-Description=Graphite dark theme with teal accent
-Type=sddm-theme
-Version=0.1
-MainScript=Main.qml
-Theme-API=2.0
-QtVersion=6

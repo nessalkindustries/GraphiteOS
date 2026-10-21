@@ -1,0 +1,10 @@
+# Graphite Teal (default theme). Phase 1: reference palette only.
+# Phase 2 will render config templates from this file (see docs/STRUCTURE.md).
+name = "Graphite Teal"
+background = "#1c1d20"
+surface    = "#2a2c30"
+border     = "#3a3d42"
+foreground = "#d4d6da"
+muted      = "#8a8d93"
+accent     = "#5eead4"
+wallpaper  = "graphite.png"

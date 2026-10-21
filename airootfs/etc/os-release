@@ -1,8 +1,8 @@
-NAME="GraphiteOS"
-PRETTY_NAME="GraphiteOS (Hyprland)"
-ID=graphiteos
+NAME="Graphite"
+PRETTY_NAME="Graphite (Hyprland)"
+ID=graphite
 ID_LIKE=arch
 BUILD_ID=rolling
 ANSI_COLOR="38;2;94;234;212"
 HOME_URL="https://github.com/Skeleten80/GraphiteOS"
-LOGO=graphiteos
+LOGO=graphite

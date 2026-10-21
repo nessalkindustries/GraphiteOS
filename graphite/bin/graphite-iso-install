@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Install Graphite from the live ISO:
+#   1. archinstall (disk, bootloader, user)  2. copy /opt/graphite into the new
+#   system  3. run install.sh inside it for the created user.
+# Usage: sudo graphite-iso-install [--target /mnt] [--skip-archinstall] [--nvidia]
+set -euo pipefail
+TARGET=/mnt; RUN_ARCHINSTALL=1; EXTRA=()
+while (($#)); do
+  case $1 in
+    --target) TARGET=${2:?}; shift 2 ;;
+    --skip-archinstall) RUN_ARCHINSTALL=0; shift ;;
+    --nvidia) EXTRA+=(--nvidia); shift ;;
+    *) echo "unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+[[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+
+if ((RUN_ARCHINSTALL)); then
+  echo "Starting archinstall. Create a user account and leave the target mounted"
+  echo "(answer 'no' to the final chroot prompt). Graphite is applied afterwards."
+  archinstall --mount-point "$TARGET" || { echo "archinstall failed" >&2; exit 1; }
+fi
+mountpoint -q "$TARGET" || {
+  echo "error: $TARGET is not mounted. Mount the new root there and re-run with --skip-archinstall." >&2
+  exit 1
+}
+user=$(awk -F: '$3>=1000 && $3<60000 {print $1; exit}' "$TARGET/etc/passwd")
+[[ -n $user ]] || { echo "error: no regular user in $TARGET/etc/passwd; create one first." >&2; exit 1; }
+
+echo "Copying Graphite into $TARGET/opt/graphite"
+rm -rf "$TARGET/opt/graphite"; mkdir -p "$TARGET/opt"
+cp -a /opt/graphite "$TARGET/opt/graphite"
+arch-chroot "$TARGET" /opt/graphite/install.sh --user "$user" "${EXTRA[@]}"
+echo "Done. Reboot into Graphite and log in as $user."

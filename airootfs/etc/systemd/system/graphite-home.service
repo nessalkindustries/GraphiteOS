@@ -1,8 +1,9 @@
 [Unit]
-Description=Fix ownership of GraphiteOS live user home
+Description=Graphite: set up the live user's home from /opt/graphite (install.sh --live)
 Before=display-manager.service
+ConditionPathExists=/opt/graphite/install.sh
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/chown -R graphite:graphite /home/graphite
+ExecStart=/opt/graphite/install.sh --live --user graphite
 [Install]
 WantedBy=multi-user.target
