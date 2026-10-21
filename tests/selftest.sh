@@ -14,7 +14,12 @@ next() { echo "$1" > "$ST/stage"; sync; }
 cmdline=$(cat /proc/cmdline)
 
 common_checks() {
-  systemctl is-system-running --wait >/dev/null 2>&1 || true
+  # we are part of the boot transaction ourselves, so 'is-system-running --wait'
+  # would deadlock: wait (bounded) until our own job is the only one left instead
+  for _ in $(seq 120); do
+    [[ $(systemctl list-jobs --no-legend | grep -vc graphite-selftest) -eq 0 ]] && break
+    sleep 5
+  done
   check "no failed units ($(systemctl --failed --no-legend --plain | awk '{print $1}' | tr '\n' ' '))" '[[ -z $(systemctl --failed --no-legend --plain) ]]'
   check "root is LUKS2" 'cryptsetup status cryptroot | grep -q "type:.*LUKS2"'
   check "root on btrfs" '[[ $(findmnt -no FSTYPE /) == btrfs ]]'

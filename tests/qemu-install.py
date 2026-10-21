@@ -35,6 +35,9 @@ host = f"http://10.0.2.2:{PORT}"
 with open(os.path.join(ROOT, "tests", "autoinstall.sh")) as f:
     s = f.read().replace("@HOST@", host).replace("${GRAPHITE_TEST_PROFILE:-desktop}", PROFILE)
 open(os.path.join(www, "autoinstall.sh"), "w").write(s)
+with open(os.path.join(ROOT, "tests", "patch-selftest.sh")) as f:
+    open(os.path.join(www, "patch-selftest.sh"), "w").write(f.read().replace("@HOST@", host))
+LIVE_SCRIPT = "patch-selftest.sh" if ("--patch-selftest" in sys.argv and "--keep-disk" in sys.argv) else "autoinstall.sh"
 shutil.copy(os.path.join(ROOT, "tests", "selftest.sh"), www)
 if os.path.isdir("/var/cache/graphite-pkg"):
     os.symlink("/var/cache/graphite-pkg", os.path.join(www, "pkg"))
@@ -89,7 +92,7 @@ def send(p, s):
 # --- 1. install from the live ISO ------------------------------------------
 t0 = time.time()
 append = (f"archisobasedir=graphite archisolabel={label} console=tty0 console=ttyS0,115200 "
-          f"graphite.autorun={host}/autoinstall.sh graphite.tz=America/Toronto systemd.mask=sddm.service")
+          f"graphite.autorun={host}/{LIVE_SCRIPT} graphite.tz=America/Toronto systemd.mask=sddm.service")
 inst = qemu(["-kernel", f"{kd}/vmlinuz-linux", "-initrd", f"{kd}/initramfs-linux.img", "-append", append,
              "-cdrom", ISO], "install.log", 4 * 3600)
 ok = "GRAPHITE-INSTALL: OK" in inst
