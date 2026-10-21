@@ -110,10 +110,20 @@ def make_handler(boot):
         if re.search(r"Enter passphrase for|A password is required to access", text[-600:]) and not st.get(("pw", text.count("passphrase"))):
             st[("pw", text.count("passphrase"))] = 1; time.sleep(1); send(p, LUKS + "\r")
         if boot == 2 and "grub" not in st and ("Use the" in text and "keys to select" in text):
-            st["grub"] = 1
-            send(p, "\x1b[B" * 25); time.sleep(1); send(p, "\r"); time.sleep(3)   # last entry: snapshots submenu
-            send(p, "\x1b[B"); time.sleep(1); send(p, "\r"); time.sleep(3)          # skip header row -> newest snapshot; then skip its header row -> first kernel
-            send(p, "\x1b[B"); time.sleep(1); send(p, "\r"); note("boot 2: navigated GRUB -> snapshots submenu -> newest snapshot")
+            # step Down until the highlighted row (drawn as "*<title>") is the grub-btrfs submenu;
+            # its position depends on the distro name and firmware entries, so don't count
+            now = time.time()
+            if now - st.get("nav_t", 0) < 1.5:
+                return
+            hl = re.findall(r"H\*([^\r\n\x1b]*)", text)
+            if hl and "snapshots" in hl[-1]:
+                st["grub"] = 1
+                send(p, "\r"); time.sleep(3)                                            # open snapshots submenu
+                send(p, "\x1b[B"); time.sleep(1); send(p, "\r"); time.sleep(3)        # skip header row -> newest snapshot
+                send(p, "\x1b[B"); time.sleep(1); send(p, "\r")                       # skip its header row -> first kernel
+                note(f"boot 2: navigated GRUB -> snapshots submenu ({st.get('nav', 0)} Downs) -> newest snapshot")
+            elif st.get("nav", 0) < 40:
+                st["nav"] = st.get("nav", 0) + 1; st["nav_t"] = now; send(p, "\x1b[B")
     return h
 for boot in range(1, 7):
     t = time.time()

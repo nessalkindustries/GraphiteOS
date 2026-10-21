@@ -75,7 +75,7 @@ case $stage in
     say "ok   booted a read-only snapshot from GRUB: $(grep -o 'rootflags=[^ ]*' /proc/cmdline)"
     check "snapshot boot reached multi-user" 'systemctl is-active multi-user.target'
   else
-    say "SKIP snapshot boot not verified (GRUB menu not navigated); continuing"
+    say "FAIL snapshot boot: booted the normal root, not a snapshot"; fails=$((fails+1))
   fi
   next 3; systemctl reboot ;;
 3)
