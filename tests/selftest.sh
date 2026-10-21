@@ -54,11 +54,10 @@ case $stage in
   say "running graphite update --yes (news check, -Syu, migrations, pacdiff)"
   if HOME=/root graphite update --yes > "$ST/update.log" 2>&1; then say "ok   graphite update"; else say "FAIL graphite update"; tail -20 "$ST/update.log"; fails=$((fails+1)); fi
   sed 's/^/  | /' "$ST/update.log" | tail -15
-  check "snap-pac created pre/post snapshots" '[[ $(snapper -c root list --columns type | grep -cE "pre|post") -ge 2 ]]'
   say "installing cowsay (snap-pac pre/post) for the rollback test"
   pacman -S --noconfirm cowsay >/dev/null 2>&1
-  pre=$(snapper -c root list --columns number,type,description | awk -F'|' '/pre/ && /cowsay/ {gsub(/ /,"",$1); n=$1} END{print n}')
-  [[ -n $pre ]] || pre=$(snapper -c root list --columns number,type | awk -F'|' '/pre/{gsub(/ /,"",$1); n=$1} END{print n}')
+  check "snap-pac created pre/post snapshots" '[[ $(snapper --csvout -c root list --columns type | grep -cE "^(pre|post)$") -ge 2 ]]'
+  pre=$(snapper --csvout -c root list --columns number,type,description | awk -F, '$2=="pre" && /cowsay/ {n=$1} END{print n}')
   echo "$pre" > "$ST/pre"; say "rollback target (pre-cowsay snapshot) = $pre"
   grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
   check "grub-btrfs generated snapshot entries" 'grep -q "menuentry\|submenu" /boot/grub/grub-btrfs.cfg'

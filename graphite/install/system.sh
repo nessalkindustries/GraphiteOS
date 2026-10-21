@@ -2,7 +2,8 @@
 # Machine-wide setup. All files come from packages (graphite-config); this phase
 # only enables services and creates state (Snapper config). Skipped on the live ISO.
 if ((! LIVE)); then
-  enable() { systemctl enable "$@" >/dev/null 2>&1 || warn "could not enable $*"; }
+  # one unit per call: a single bad unit must not leave the others disabled
+  enable() { local u; for u in "$@"; do systemctl enable "$u" >/dev/null 2>&1 || warn "could not enable $u: $(systemctl enable "$u" 2>&1 | tail -1)"; done; }
   enable sddm.service graphite-firewall.service power-profiles-daemon.service
   enable fstrim.timer paccache.timer reflector.timer fwupd-refresh.timer
   [[ $PROFILE == full ]] && enable docker.service
