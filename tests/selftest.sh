@@ -65,7 +65,7 @@ case $stage in
   check "snap-pac created pre/post snapshots" '[[ $(snapper --csvout -c root list --columns type | grep -cE "^(pre|post)$") -ge 2 ]]'
   pre=$(snapper --csvout -c root list --columns number,type,description | awk -F, '$2=="pre" && /cowsay/ {n=$1} END{print n}')
   echo "$pre" > "$ST/pre"; say "rollback target (pre-cowsay snapshot) = $pre"
-  grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
+  grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | grep -i "btrfs\|error\|snapshot" | sed "s/^/  grub-mkconfig| /" | tail -6
   check "grub-btrfs generated snapshot entries" 'grep -q "menuentry\|submenu" /boot/grub/grub-btrfs.cfg'
   idx=$(awk '/^[[:space:]]*(menuentry|submenu) /{i++} /^[[:space:]]*submenu .*snapshots/{print i-1; exit}' /boot/grub/grub.cfg)
   say "SNAPMENU index=${idx:-unknown}"
@@ -89,6 +89,8 @@ case $stage in
   check "cowsay gone after rollback (root restored)" '! command -v cowsay'
   check "pacman usable after rollback (no stale db.lck)" '! test -e /var/lib/pacman/db.lck && pacman -Q base'
   common_checks
+  grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | grep -i "btrfs\|error\|snapshot" | sed "s/^/  grub-mkconfig| /" | tail -6
+  check "grub-btrfs still finds snapshots after a rollback" 'grep -q "menuentry\|submenu" /boot/grub/grub-btrfs.cfg'
   say "ALL DONE fails=$fails"
   systemctl disable graphite-selftest.service >/dev/null 2>&1
   # harness-only: autologin for the screenshot boot that follows (installed systems never get this)
