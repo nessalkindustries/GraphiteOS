@@ -108,8 +108,8 @@ def make_handler(boot):
         if boot == 2 and "grub" not in st and ("Use the" in text and "keys to select" in text):
             st["grub"] = 1
             send(p, "\x1b[B" * 25); time.sleep(1); send(p, "\r"); time.sleep(3)   # last entry: snapshots submenu
-            send(p, "\x1b[B"); time.sleep(1); send(p, "\r"); time.sleep(3)          # skip grub-btrfs header row -> newest snapshot
-            send(p, "\r"); note("boot 2: navigated GRUB -> snapshots submenu -> newest snapshot")
+            send(p, "\x1b[B"); time.sleep(1); send(p, "\r"); time.sleep(3)          # skip header row -> newest snapshot; then skip its header row -> first kernel
+            send(p, "\x1b[B"); time.sleep(1); send(p, "\r"); note("boot 2: navigated GRUB -> snapshots submenu -> newest snapshot")
     return h
 for boot in range(1, 7):
     t = time.time()
