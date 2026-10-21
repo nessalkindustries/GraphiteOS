@@ -57,7 +57,7 @@ if "--keep-disk" not in sys.argv or not os.path.exists(DISK):
     shutil.copy(OVMF_VARS_SRC, VARS)
 
 def qemu(extra, logname, timeout, on_line=None, done=None):
-    cmd = ["qemu-system-x86_64", "-accel", "tcg,thread=multi", "-cpu", "max", "-m", "6144", "-smp", "4",
+    cmd = ["qemu-system-x86_64", "-machine", "q35", "-accel", "tcg,thread=multi", "-cpu", "max", "-m", "6144", "-smp", "4",
            "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
            "-drive", f"if=pflash,format=raw,file={VARS}",
            "-drive", f"file={DISK},if=virtio,format=qcow2,cache=unsafe",
