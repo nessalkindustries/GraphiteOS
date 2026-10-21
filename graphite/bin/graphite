@@ -1,61 +1,156 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016,SC2012  # eval strings in doctor(); module dir names are plain
 # Graphite command center.
 set -euo pipefail
-GRAPHITE_PATH=${GRAPHITE_PATH:-/opt/graphite}
+GRAPHITE_PATH=${GRAPHITE_PATH:-/usr/share/graphite}
 export GRAPHITE_PATH
+STATE_DIR="$HOME/.local/state/graphite"
+NEWS_URL=${GRAPHITE_NEWS_URL:-https://archlinux.org/feeds/news/}
 
 help() {
   cat <<HELP
 Graphite command center ($(cat "$GRAPHITE_PATH/VERSION" 2>/dev/null || echo dev))
 
 Usage: graphite <command> [args]
-  update [--no-packages]   update Graphite code (stub), system packages, then run migrations
-  migrate [--pending]      run (or list) pending migrations for this user
-  install [args]           (re)run the installer: sudo-wraps $GRAPHITE_PATH/install.sh
-  theme list|current       list themes / show the active theme
-  keybinds                 print Hyprland keybindings
-  version                  print the Graphite version
-  debug                    print system info useful for bug reports
+  update [--yes] [--no-news]  Arch news check -> pacman -Syu -> migrations -> pacnew report
+  migrate [--pending]         run (or list) pending migrations for this user
+  theme list|current|set N    themes (colors.toml -> generated configs)
+  keybinds                    keybinding cheatsheet (also Super+K)
+  snapshots                   list Snapper snapshots of /
+  rollback N                  make snapshot N the new root (reboot afterwards)
+  doctor                      health checks (services, portals, snapshots, firewall, zram)
+  install [args]              run the installer (install.sh)
+  version | debug | help
 HELP
 }
 
-update() {
-  local packages=1
-  [[ ${1:-} == --no-packages ]] && packages=0
-  # Code update. The repo is private, so the ISO ships the code at $GRAPHITE_PATH.
-  # When a public (or token-reachable) remote exists, set GRAPHITE_REMOTE_UPDATES=1
-  # and this becomes: git -C "$GRAPHITE_PATH" pull --ff-only (or a pacman package).
-  if [[ ${GRAPHITE_REMOTE_UPDATES:-0} == 1 && -d $GRAPHITE_PATH/.git ]]; then
-    sudo git -C "$GRAPHITE_PATH" pull --ff-only
+# --- Arch news: show items published since the last successful update -------
+news_check() {
+  local yes=$1 last items
+  last=$(cat "$STATE_DIR/last-update" 2>/dev/null || echo 0)
+  items=$(curl -fsS --max-time 15 "$NEWS_URL" 2>/dev/null | python3 -c '
+import sys, email.utils, xml.etree.ElementTree as ET
+last = float(sys.argv[1])
+try: root = ET.fromstring(sys.stdin.read())
+except Exception: sys.exit(2)
+for it in root.iter("item"):
+    ts = email.utils.parsedate_to_datetime(it.findtext("pubDate")).timestamp()
+    if ts > last: print("  * %s  (%s)\n    %s" % (it.findtext("title"), it.findtext("pubDate")[:16], it.findtext("link")))
+' "$last") || { echo "Arch news: could not fetch $NEWS_URL (offline?). Check https://archlinux.org/news/ manually."; return 0; }
+  if [[ -z $items ]]; then
+    echo "Arch news: nothing new since the last update."
   else
-    echo "Code update: skipped (no remote yet; Graphite code comes from the ISO)."
+    echo "Arch news since your last update (read before upgrading; manual steps happen here):"
+    echo "$items"
+    if [[ $yes != 1 ]]; then
+      read -r -p "Continue with the update? [y/N] " a
+      [[ $a == [yY]* ]] || { echo "Update cancelled."; exit 1; }
+    fi
   fi
-  if ((packages)); then sudo pacman -Syu; fi
-  graphite-migrate
 }
 
-theme() {
-  case ${1:-list} in
-    list) for d in "$GRAPHITE_PATH"/themes/*/; do basename "$d"; done ;;
-    current) echo "graphite-teal" ;;  # phase 2: theme switching via colors.toml templates
-    *) echo "usage: graphite theme list|current" >&2; return 1 ;;
-  esac
+update() {
+  local yes=0 news=1
+  while (($#)); do
+    case $1 in --yes|-y) yes=1 ;; --no-news) news=0 ;; *) echo "unknown option $1" >&2; exit 1 ;; esac
+    shift
+  done
+  mkdir -p "$STATE_DIR"
+  ((news)) && news_check "$yes"
+  # Graphite's own code arrives as the graphite-config package from [graphite];
+  # there is no separate code channel: pacman is the only updater.
+  local pacargs=(-Syu)
+  ((yes)) && pacargs+=(--noconfirm)
+  sudo pacman "${pacargs[@]}"
+  date +%s > "$STATE_DIR/last-update"
+  graphite-migrate
+  echo "--- configuration files needing attention (.pacnew/.pacsave):"
+  if command -v pacdiff >/dev/null; then
+    out=$(pacdiff -o 2>/dev/null || true)
+    if [[ -n $out ]]; then echo "$out"; echo "Merge them with: sudo DIFFPROG='nvim -d' pacdiff"; else echo "none"; fi
+  fi
+  if command -v arch-audit >/dev/null; then
+    n=$(arch-audit -u 2>/dev/null | wc -l || true)
+    echo "--- arch-audit: $n installed package(s) with known vulnerabilities that already have fixes (run: arch-audit -u)"
+  fi
+  if [[ ! -d /usr/lib/modules/$(uname -r) ]]; then
+    echo "--- kernel updated: reboot to use the new kernel."
+  fi
+}
+
+snapshots() { sudo snapper -c root list; }
+
+# --- rollback: flat Btrfs layout (@ is the root subvolume) -------------------
+rollback() {
+  local n=${1:?usage: graphite rollback SNAPSHOT_NUMBER}
+  [[ $n =~ ^[0-9]+$ ]] || { echo "snapshot number expected" >&2; exit 1; }
+  [[ $EUID -eq 0 ]] || exec sudo GRAPHITE_PATH="$GRAPHITE_PATH" "$0" rollback "$@"
+  local dev top ts snap
+  dev=$(findmnt -no SOURCE / | sed 's/\[.*\]//')
+  top=$(mktemp -d)
+  mount -o subvolid=5 "$dev" "$top"
+  snap="$top/@snapshots/$n/snapshot"
+  [[ -d $snap ]] || { umount "$top"; echo "snapshot $n not found" >&2; exit 1; }
+  ts=$(date +%Y%m%d-%H%M%S)
+  # snapper's own pre-rollback safety snapshot of the current state
+  snapper -c root create -d "before rollback to $n" -c number >/dev/null 2>&1 || true
+  mv "$top/@" "$top/@.before-rollback-$ts"
+  btrfs subvolume snapshot "$snap" "$top/@" >/dev/null
+  # the kernel and initramfs live on the ESP (/boot) and are NOT rolled back
+  local snapk curk
+  snapk=$(ls "$top/@/usr/lib/modules" 2>/dev/null | sort -V | tail -1)
+  curk=$(ls /usr/lib/modules | sort -V | tail -1)
+  if [[ -n $snapk && $snapk != "$curk" ]]; then
+    echo "WARNING: snapshot $n has kernel modules $snapk, but /boot (ESP, not snapshotted) has $curk."
+    echo "         After rebooting run: sudo pacman -S linux linux-lts   (or pick the LTS entry in GRUB)."
+  fi
+  umount "$top"; rmdir "$top"
+  echo "Rolled back: @ is now a copy of snapshot $n; old root kept as @.before-rollback-$ts."
+  echo "Reboot to use it. Delete the old root later with: btrfs subvolume delete (via subvolid=5 mount)."
+}
+
+doctor() {
+  local fail=0
+  check() { if eval "$2" >/dev/null 2>&1; then printf '  ok    %s\n' "$1"; else printf '  FAIL  %s\n' "$1"; fail=1; fi; }
+  echo "System"
+  check "no failed systemd units" '[[ -z $(systemctl --failed --no-legend --plain) ]]'
+  check "firewall (graphite-firewall) active" 'systemctl is-active graphite-firewall.service'
+  check "zram swap active" 'grep -q zram /proc/swaps'
+  check "snapper root config" 'test -f /etc/snapper/configs/root'
+  check "grub-btrfsd running" 'systemctl is-active grub-btrfsd.service'
+  check "power-profiles-daemon active" 'systemctl is-active power-profiles-daemon.service'
+  check "timers: fstrim paccache reflector" 'systemctl is-enabled fstrim.timer paccache.timer reflector.timer'
+  check "sudo requires a password for wheel" '! grep -rqs NOPASSWD /etc/sudoers.d/10-graphite-wheel'
+  echo "Desktop"
+  check "xdg-desktop-portal-hyprland installed" 'pacman -Q xdg-desktop-portal-hyprland'
+  check "xdg-desktop-portal-gtk installed" 'pacman -Q xdg-desktop-portal-gtk'
+  if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
+    check "xdg-desktop-portal running" 'systemctl --user is-active xdg-desktop-portal.service'
+    check "pipewire running" 'systemctl --user is-active pipewire.service'
+  fi
+  check "theme files generated" "test -f $HOME/.config/graphite/current/hyprland.conf"
+  return $fail
 }
 
 cmd=${1:-help}; shift || true
 case $cmd in
   update) update "$@" ;;
   migrate) graphite-migrate "$@" ;;
+  theme) graphite-theme "$@" ;;
+  keybinds) graphite-keybinds "$@" ;;
+  snapshots) snapshots ;;
+  rollback) rollback "$@" ;;
+  doctor) doctor ;;
   install) exec "$GRAPHITE_PATH/install.sh" "$@" ;;
-  theme) theme "$@" ;;
-  keybinds) grep -E '^\s*bind[mel]* *=' "$HOME/.config/hypr/hyprland.conf" | sed 's/^\s*bind[mel]* *= *//' ;;
   version) cat "$GRAPHITE_PATH/VERSION" ;;
   debug)
     echo "graphite: $(cat "$GRAPHITE_PATH/VERSION") at $GRAPHITE_PATH"
     uname -a
     grep -E '^(PRETTY_NAME|ID)=' /etc/os-release || true
+    cat /usr/lib/graphite-release 2>/dev/null || true
     echo "pending migrations:"; graphite-migrate --pending || echo "  none"
-    if command -v hyprctl >/dev/null; then hyprctl version 2>/dev/null | head -1; fi ;;
+    if command -v hyprctl >/dev/null; then hyprctl version 2>/dev/null | head -1; fi
+    doctor || true ;;
   help|-h|--help) help ;;
   *) echo "unknown command: $cmd" >&2; help >&2; exit 1 ;;
 esac
