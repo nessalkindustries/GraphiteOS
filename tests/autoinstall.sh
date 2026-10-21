@@ -4,6 +4,8 @@
 # @HOST@ is replaced by the harness with the host's HTTP server (10.0.2.2:port).
 set -euxo pipefail
 HOST=@HOST@
+# keyring must be ready before pacstrap (ISOs before the installer fix need this here)
+systemctl start pacman-init.service
 curl -fsSL "$HOST/selftest.sh" -o /tmp/selftest.sh
 export GRAPHITE_CACHE_SERVER="$HOST/pkg"
 graphite-iso-install --disk /dev/vda --user tester --password 'graphite-test' \

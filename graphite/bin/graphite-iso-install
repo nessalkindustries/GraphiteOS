@@ -96,6 +96,9 @@ mount -o "$OPTS,subvol=@snapshots" /dev/mapper/cryptroot "$MNT/.snapshots"
 mount -o umask=0077 "$ESP" "$MNT/boot"
 
 log "Base system (pacstrap)"
+# On the live ISO the pacman keyring is created at boot by pacman-init.service;
+# wait for it (starting a finished oneshot is a no-op).
+systemctl start pacman-init.service 2>/dev/null || true
 # pacman.conf for the target: Arch defaults + [multilib] + local [graphite] overlay
 # (listed LAST so it can never shadow an official package).
 CONF=$(mktemp)
