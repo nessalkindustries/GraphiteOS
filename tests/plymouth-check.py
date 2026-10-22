@@ -35,15 +35,18 @@ base = ["qemu-system-x86_64", "-machine", "q35", "-accel", "tcg,thread=multi", "
         "-display", "none", "-vga", "none", "-device", "virtio-vga,xres=1600,yres=900", "-no-reboot", "-rtc", "base=utc"]
 # --- 1. patch from the live ISO
 t0 = time.time()
-p = subprocess.run(base + ["-kernel", f"{kd}/vmlinuz-linux", "-initrd", f"{kd}/initramfs-linux.img", "-cdrom", ISO, "-serial", "stdio",
-     "-append", f"archisobasedir=graphite archisolabel={label} console=tty0 console=ttyS0,115200 graphite.tz=America/Toronto "
-                f"systemd.mask=sddm.service graphite.autorun={host}/patch-rice.sh"], capture_output=True, timeout=3600)
-out = p.stdout.decode(errors="replace"); open(os.path.join(OUT, "patch-rice.log"), "w").write(out)
-for l in re.findall(r"(PATCH-RICE:[^\r\n]*|theme: [^\r\n]*|hook: [^\r\n]*|cmdline: [^\r\n]*|/etc/mkinitcpio.conf:HOOKS[^\r\n]*|/etc/default/grub:GRUB_CMDLINE[^\r\n]*)", out):
-    note(l.strip())
-if "PATCH-RICE: OK" not in out:
-    note(f"patch FAILED after {int(time.time()-t0)}s"); sys.exit(1)
-note(f"patch OK in {int(time.time()-t0)}s")
+if "--skip-patch" in sys.argv:
+    note("patch skipped (disk already patched)")
+else:
+  p = subprocess.run(base + ["-kernel", f"{kd}/vmlinuz-linux", "-initrd", f"{kd}/initramfs-linux.img", "-cdrom", ISO, "-serial", "stdio",
+       "-append", f"archisobasedir=graphite archisolabel={label} console=tty0 console=ttyS0,115200 graphite.tz=America/Toronto "
+                  f"systemd.mask=sddm.service graphite.autorun={host}/patch-rice.sh"], capture_output=True, timeout=3600)
+  out = p.stdout.decode(errors="replace"); open(os.path.join(OUT, "patch-rice.log"), "w").write(out)
+  for l in re.findall(r"(PATCH-RICE:[^\r\n]*|theme: [^\r\n]*|hook: [^\r\n]*|cmdline: [^\r\n]*|/etc/mkinitcpio.conf:HOOKS[^\r\n]*|/etc/default/grub:GRUB_CMDLINE[^\r\n]*)", out):
+      note(l.strip())
+  if "PATCH-RICE: OK" not in out:
+      note(f"patch FAILED after {int(time.time()-t0)}s"); sys.exit(1)
+  note(f"patch OK in {int(time.time()-t0)}s")
 # --- 2. real boot: splash + LUKS prompt + SDDM
 sock = os.path.join(OUT, "pmon.sock")
 q = subprocess.Popen(base + ["-monitor", f"unix:{sock},server,nowait", "-serial", "null"])

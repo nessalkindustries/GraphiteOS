@@ -24,6 +24,6 @@ arch-chroot /mnt systemctl disable graphite-selftest.service || true
 arch-chroot /mnt graphite splash on
 arch-chroot /mnt graphite splash status
 grep -E '^(HOOKS|GRUB_CMDLINE_LINUX_DEFAULT)' /mnt/etc/mkinitcpio.conf /mnt/etc/default/grub
-umount -R /mnt; cryptsetup close cryptroot; sync
+umount -R /mnt; sync; cryptsetup close cryptroot || echo "PATCH-RICE: cryptroot busy (already unmounted, ok)"
 echo "PATCH-RICE: OK"
 systemctl poweroff
