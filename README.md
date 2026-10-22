@@ -1,6 +1,6 @@
 # Graphite
 
-An opinionated Arch Linux + **Hyprland** system for **gaming** and **programming**, in the spirit of Omarchy.
+An opinionated Arch Linux + **Hyprland** system for **gaming** and **programming**.
 The palette is graphite and dark grey with a single teal accent (`#5eead4`).
 
 Graphite has two install paths, and both come from one source tree, `graphite/`:

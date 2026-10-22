@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Omarchy-style online bootstrap for an existing Arch install:
+# Online bootstrap for an existing Arch install:
 #   curl -fsSL <url>/boot.sh | bash
 # STUB: the Graphite repo is private, so there is no public URL yet. Today Graphite
 # is installed from the ISO (graphite-iso-install) or from a local checkout:
