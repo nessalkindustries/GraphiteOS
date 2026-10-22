@@ -3,7 +3,7 @@
 # Never overwrites files owned by other packages (rule: overlay, not replacement).
 pkgname=graphite-config
 pkgver=0.3.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Graphite defaults: CLI, themes, user config skeleton, system drop-ins"
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"
@@ -27,6 +27,8 @@ package() {
   # user configs: new users get them via /etc/skel
   install -d "$pkgdir/etc/skel/.config"
   cp -r "$src"/config/. "$pkgdir/etc/skel/.config/"
+  # launcher declutter: per-user NoDisplay overrides (pacman never touches ~/.local)
+  install -Dm644 -t "$pkgdir/etc/skel/.local/share/applications" "$src"/local-apps/*.desktop
   # assets
   install -Dm644 -t "$pkgdir/usr/share/backgrounds/graphite" "$src"/assets/backgrounds/*
   install -Dm644 "$src/assets/fastfetch/logo.txt" "$share/fastfetch/logo.txt"
