@@ -77,7 +77,11 @@ reload_desktop() {
   pkill -x waybar 2>/dev/null || true
   for _ in $(seq 50); do pgrep -x waybar >/dev/null || break; sleep 0.2; done
   pkill -9 -x waybar 2>/dev/null || true
-  hyprctl dispatch exec waybar >/dev/null 2>&1 || setsid -f waybar >/dev/null 2>&1 || true
+  local wl=/tmp/graphite-waybar.log
+  hyprctl dispatch exec "waybar >$wl 2>&1" >/dev/null 2>&1 || setsid -f waybar >"$wl" 2>&1 || true
+  # verify the new bar actually came up; one retry if it died during startup (seen under load)
+  for _ in $(seq 50); do pgrep -x waybar >/dev/null && break; sleep 0.2; done
+  sleep 2; pgrep -x waybar >/dev/null || hyprctl dispatch exec "waybar >>$wl 2>&1" >/dev/null 2>&1 || true
   makoctl reload 2>/dev/null || true
   pkill -SIGUSR1 -x kitty 2>/dev/null || true       # kitty reloads its config
   # new wallpaper: restart the wallpaper daemon detached from this shell
