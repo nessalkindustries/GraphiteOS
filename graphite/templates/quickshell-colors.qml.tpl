@@ -10,6 +10,7 @@ Singleton {
     readonly property color muted: "{{muted}}"
     readonly property color accent: "{{accent}}"
     readonly property color accent2: "{{accent2}}"
-    readonly property color onAccent: "{{on_accent}}"
+    // not "onAccent": QML treats on<Upper> names as signal handlers
+    readonly property color accentText: "{{on_accent}}"
     readonly property color red: "{{red}}"
 }

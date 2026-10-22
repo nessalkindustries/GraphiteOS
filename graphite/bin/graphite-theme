@@ -74,19 +74,28 @@ reload_desktop() {
   # was already dead, and only after the old instance is really gone (under load a 2 s wait was
   # too short and the new bar lost the layer-shell race). Launch through Hyprland so the bar gets
   # the compositor's environment, not that of whatever called graphite-theme (rofi/keybind/tty).
+  # Single, serialised restart. Root causes seen in the VM: (1) the previous "retry if not up after
+  # 2 s" spawned a second bar because a freshly launched bar is still `sh -c` / not mapped for
+  # several seconds under load; (2) the bar can take >30 s to map on a loaded machine, so callers
+  # (and the smoke test) must wait for the layer, not assume a fixed delay.
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/graphite-theme.lock"; flock -w 60 9 || true
   pkill -x waybar 2>/dev/null || true
   for _ in $(seq 50); do pgrep -x waybar >/dev/null || break; sleep 0.2; done
   pkill -9 -x waybar 2>/dev/null || true
-  local wl=/tmp/graphite-waybar.log
-  hyprctl dispatch exec "waybar >$wl 2>&1" >/dev/null 2>&1 || setsid -f waybar >"$wl" 2>&1 || true
-  # verify the new bar actually came up; one retry if it died during startup (seen under load)
-  for _ in $(seq 50); do pgrep -x waybar >/dev/null && break; sleep 0.2; done
-  sleep 2; pgrep -x waybar >/dev/null || hyprctl dispatch exec "waybar >>$wl 2>&1" >/dev/null 2>&1 || true
+  local wl=${XDG_RUNTIME_DIR:-/tmp}/graphite-waybar.log
+  # Launch ONLY through Hyprland. Root cause of the vanishing/duplicate bar: under load hyprctl can
+  # return non-zero although the dispatch went through, and the old `|| setsid -f waybar` fallback
+  # then started a second bar inside the *caller's* session (tty/ssh/rofi). That copy died with the
+  # caller's session, or both ran stacked. Never start the bar outside the compositor.
+  hyprctl dispatch exec "exec waybar >$wl 2>&1" >/dev/null 2>&1 || true
+  # wait (bounded) for the new bar to map; relaunch only if no bar process exists at all
+  for _ in $(seq 60); do hyprctl layers 2>/dev/null | grep -q 'namespace: waybar' && break; sleep 0.5; done
+  pgrep -x waybar >/dev/null || hyprctl dispatch exec "exec waybar >>$wl 2>&1" >/dev/null 2>&1 || true
   makoctl reload 2>/dev/null || true
   pkill -SIGUSR1 -x kitty 2>/dev/null || true       # kitty reloads its config
   # new wallpaper: restart the wallpaper daemon detached from this shell
   pkill -x hyprpaper 2>/dev/null || true; pkill -x swaybg 2>/dev/null || true
-  setsid -f graphite-wallpaper >/dev/null 2>&1 || true
+  hyprctl dispatch exec graphite-wallpaper >/dev/null 2>&1 || true   # in the compositor session, not the caller's
 }
 
 case ${1:-current} in
