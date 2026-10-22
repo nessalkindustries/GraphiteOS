@@ -7,7 +7,7 @@ Usage: tests/plymouth-check.py [ISO]"""
 import glob, http.server, os, re, shutil, socket, socketserver, subprocess, sys, threading, time
 from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ISO = sys.argv[1] if len(sys.argv) > 1 else max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
+ISO = next((a for a in sys.argv[1:] if a.endswith(".iso")), None) or max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
 H = os.path.join(ROOT, "out", "harness"); OUT = os.path.join(ROOT, "out", "rice"); os.makedirs(OUT, exist_ok=True)
 DISK, VARS = os.path.join(H, "disk.qcow2"), os.path.join(H, "ovmf_vars.fd")
 PORT, LUKS = 8765, "graphite-luks"
