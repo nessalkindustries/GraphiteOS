@@ -131,8 +131,5 @@ Rectangle {
             MouseArea { anchors.fill: parent; onClicked: sddm.powerOff() }
         }
     }
-    Text {
-        anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.margins: 28
-        text: "graphite"; color: "#5c6068"; font.family: "Inter"; font.pixelSize: 15; font.weight: Font.DemiBold
-    }
+    // no wordmark here: the wallpaper already carries "graphite" (it showed twice)
 }

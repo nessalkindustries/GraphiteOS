@@ -63,6 +63,13 @@ update() {
   ((news)) && news_check "$yes"
   # Graphite's own code arrives as the graphite-config package from [graphite];
   # there is no separate code channel: pacman is the only updater.
+  # explicit, labelled pre-update snapshot (snap-pac's pre/post pair is per transaction;
+  # this one marks the whole `graphite update` and is what docs/recovery.md points to)
+  if command -v snapper >/dev/null && sudo snapper -c root list >/dev/null 2>&1; then
+    local snapn
+    snapn=$(sudo snapper -c root create -c number -p -d "graphite update $(date +%F_%H:%M)" 2>/dev/null) &&
+      echo "--- pre-update snapshot: #$snapn (undo with: graphite rollback $snapn)"
+  fi
   local pacargs=(-Syu)
   ((yes)) && pacargs+=(--noconfirm)
   sudo pacman "${pacargs[@]}"

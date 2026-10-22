@@ -39,6 +39,7 @@ with open(os.path.join(ROOT, "tests", "patch-selftest.sh")) as f:
     open(os.path.join(www, "patch-selftest.sh"), "w").write(f.read().replace("@HOST@", host))
 LIVE_SCRIPT = "patch-selftest.sh" if ("--patch-selftest" in sys.argv and "--keep-disk" in sys.argv) else "autoinstall.sh"
 shutil.copy(os.path.join(ROOT, "tests", "selftest.sh"), www)
+open(os.path.join(www, "smoke.sh"), "w").write(open(os.path.join(ROOT, "tests", "smoke.sh")).read().replace("@HOST@", host))
 shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite"), os.path.join(www, "graphite-bin"))
 if os.path.isdir("/var/cache/graphite-pkg"):
     os.symlink("/var/cache/graphite-pkg", os.path.join(www, "pkg"))
@@ -81,6 +82,7 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
             if on_line and buf: on_line(buf.decode(errors="replace"), p, state)   # timers
             continue
         log.write(chunk); log.flush(); buf = (buf + chunk)[-20000:]
+        state["hl"] = state.get("hl", 0) + chunk.count(b"H*")   # GRUB highlight redraws (monotonic)
         text = buf.decode(errors="replace")
         for m in re.finditer(r"SELFTEST: [^\r\n]*[\r\n]", text):
             k = ("st", m.group(0))
@@ -109,6 +111,19 @@ def make_handler(boot):
     def h(text, p, st):
         if re.search(r"Enter passphrase for|A password is required to access", text[-600:]) and not st.get(("pw", text.count("passphrase"))):
             st[("pw", text.count("passphrase"))] = 1; time.sleep(1); send(p, LUKS + "\r")
+        if boot == 2 and st.get("seq", 99) < 5:
+            # open submenu, skip header -> newest snapshot, open, skip header -> first kernel, boot.
+            # Each key is sent only after GRUB redrew the highlight for the previous one; resent after 20 s.
+            keys = ["\r", "\x1b[B", "\r", "\x1b[B", "\r"]
+            n = st.get("hl", 0); now = time.time()
+            if st["mark"] < 0 or n > st["mark"] or (now - st["kt"] > 20 and "keys to select" in text[-4000:] and "passphrase" not in text[-4000:]):
+                if st["mark"] >= 0 and n > st["mark"]: st["seq"] += 1
+                if st["seq"] < 5:
+                    time.sleep(1.5); n = st.get("hl", 0)
+                    send(p, keys[st["seq"]]); st["mark"] = n; st["kt"] = time.time()
+                else:
+                    st["seq"] = 6; note("boot 2: snapshot entry booted (sequenced keys)")
+            return
         if boot == 2 and "grub" not in st and ("Use the" in text and "keys to select" in text):
             # step Down until the highlighted row (drawn as "*<title>") is the grub-btrfs submenu;
             # its position depends on the distro name and firmware entries, so don't count
@@ -117,11 +132,8 @@ def make_handler(boot):
                 return
             hl = re.findall(r"H\*([^\r\n\x1b]*)", text)
             if hl and "snapshots" in hl[-1]:
-                st["grub"] = 1
-                send(p, "\r"); time.sleep(3)                                            # open snapshots submenu
-                send(p, "\x1b[B"); time.sleep(1); send(p, "\r"); time.sleep(3)        # skip header row -> newest snapshot
-                send(p, "\x1b[B"); time.sleep(1); send(p, "\r")                       # skip its header row -> first kernel
-                note(f"boot 2: navigated GRUB -> snapshots submenu ({st.get('nav', 0)} Downs) -> newest snapshot")
+                st["grub"] = 1; st["seq"] = 0; st["mark"] = -1
+                note(f"boot 2: GRUB 'snapshots' highlighted after {st.get('nav', 0)} Downs")
             elif st.get("nav", 0) < 40:
                 st["nav"] = st.get("nav", 0) + 1; st["nav_t"] = now; send(p, "\x1b[B")
     return h
@@ -137,8 +149,14 @@ if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.gl
     def shot(text, p, st):
         if "login:" in text and "t" not in st:
             st["t"] = time.time()
-        if "t" in st and "shot" not in st and time.time() - st["t"] > 150:
-            st["shot"] = 1
+        # smoke tests: log in on the serial getty (desktop autologin runs on tty1) and run smoke.sh
+        if "t" in st and "smoke" not in st and time.time() - st["t"] > 150:
+            st["smoke"] = 1; send(p, "tester\r"); time.sleep(4); send(p, "graphite-test\r"); time.sleep(6)
+            send(p, f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.time()
+        for m in re.findall(r"@SMOKE: ([^\r\n]*)[\r\n]", text):
+            if ("sm", m) not in st: st[("sm", m)] = 1; note("SMOKE: " + m)
+        if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.time() - st["st"] > 600):
+            st["shot"] = 1; time.sleep(20)   # let the kitty opened by smoke.sh draw
             s2 = socket.socket(socket.AF_UNIX); s2.connect(sock)
             s2.send(f"screendump {ppm}\n".encode()); time.sleep(3)
             s2.send(b"quit\n"); time.sleep(1); s2.close()
@@ -155,6 +173,9 @@ if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.gl
         note("screenshot: not taken")
 allout = "".join(open(f).read() for f in sorted(glob.glob(os.path.join(OUT, "boot-*.log"))))
 fails = sorted(set(re.findall(r"SELFTEST: FAIL[^\r\n]*", allout)))
+shotlog = open(os.path.join(OUT, "boot-shot.log"), errors="replace").read() if os.path.exists(os.path.join(OUT, "boot-shot.log")) else ""
+fails += sorted(set(re.findall(r"@SMOKE: FAIL[^\r\n]*", shotlog)))
+if "@SMOKE: DONE" not in shotlog: fails.append("SMOKE: did not finish")
 done = "SELFTEST: ALL DONE" in allout
 note(f"RESULT: {'PASS' if done and not fails else 'FAIL'} (all-done={done}, failures={len(fails)})")
 for f in fails: note("  " + f)

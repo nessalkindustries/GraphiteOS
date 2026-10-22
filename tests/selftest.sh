@@ -57,6 +57,7 @@ case $stage in
   if pacman -Syu --noconfirm > "$ST/syu.log" 2>&1; then say "ok   pacman -Syu"; else say "FAIL pacman -Syu"; tail -20 "$ST/syu.log"; fails=$((fails+1)); fi
   say "running graphite update --yes (news check, -Syu, migrations, pacdiff)"
   if HOME=/root graphite update --yes > "$ST/update.log" 2>&1; then say "ok   graphite update"; else say "FAIL graphite update"; tail -20 "$ST/update.log"; fails=$((fails+1)); fi
+  check "graphite update took a labelled pre-update snapshot" 'grep -q "pre-update snapshot: #" "$ST/update.log" && snapper -c root list | grep -q "graphite update"'
   sed 's/^/  | /' "$ST/update.log" | tail -15
   say "installing cowsay (snap-pac pre/post) for the rollback test"
   pacman -Q cowsay >/dev/null 2>&1 && pacman -Rns --noconfirm cowsay >/dev/null 2>&1  # reused disk: start clean
