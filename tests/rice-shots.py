@@ -4,14 +4,18 @@ screendump every "RICE-SHOT <name>" scene to out/rice/<name>.png.
 Usage: tests/rice-shots.py [ISO]"""
 import glob, http.server, os, re, socket, socketserver, subprocess, sys, threading, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ISO = [a for a in sys.argv[1:] if not a.startswith("--")][0] if [a for a in sys.argv[1:] if not a.startswith("--")] else max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
+ISO = [a for a in sys.argv[1:] if a.endswith(".iso")][0] if [a for a in sys.argv[1:] if a.endswith(".iso")] else max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
 OUT = os.path.join(ROOT, "out", "rice"); os.makedirs(OUT, exist_ok=True)
 PORT = 8766
 www = os.path.join(OUT, "www"); os.makedirs(www, exist_ok=True)
 open(os.path.join(www, "rice-demo.sh"), "w").write(open(os.path.join(ROOT, "tests", "rice-demo.sh")).read().replace("@HOST@", f"http://10.0.2.2:{PORT}"))
 if "--override" in sys.argv:
     os.makedirs(os.path.join(www, "override"), exist_ok=True)
-    subprocess.run(["cp", os.path.join(ROOT, "graphite", "config", "hypr", "hyprland.conf"), os.path.join(www, "override")], check=True)
+    files = sys.argv[sys.argv.index("--override") + 1].split(",")
+    for f in files:
+        dst = os.path.join(www, "override", f if f != "config/hypr/hyprland.conf" else "hyprland.conf")
+        os.makedirs(os.path.dirname(dst), exist_ok=True); subprocess.run(["cp", os.path.join(ROOT, "graphite", f), dst], check=True)
+    open(os.path.join(www, "override", "files.txt"), "w").write("\n".join(f for f in files if not f.startswith("config/")) + "\n")
 else:
     subprocess.run(["rm", "-rf", os.path.join(www, "override")])
 class Q(http.server.SimpleHTTPRequestHandler):

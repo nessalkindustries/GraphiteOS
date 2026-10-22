@@ -67,11 +67,15 @@ reload_desktop() {
   fi
   [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] || return 0
   hyprctl reload >/dev/null 2>&1 || true
-  pkill -SIGUSR2 -x waybar 2>/dev/null || true      # waybar reloads its CSS
+  # waybar 0.15 can exit on SIGUSR2 reloads; a clean restart is reliable
+  if pkill -x waybar 2>/dev/null; then
+    for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x waybar >/dev/null || break; sleep 0.2; done
+    setsid -f waybar >/dev/null 2>&1 || true
+  fi
   makoctl reload 2>/dev/null || true
   pkill -SIGUSR1 -x kitty 2>/dev/null || true       # kitty reloads its config
   # new wallpaper: restart the wallpaper daemon detached from this shell
-  pkill -x hyprpaper 2>/dev/null; pkill -x swaybg 2>/dev/null
+  pkill -x hyprpaper 2>/dev/null || true; pkill -x swaybg 2>/dev/null || true
   setsid -f graphite-wallpaper >/dev/null 2>&1 || true
 }
 

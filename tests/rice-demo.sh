@@ -15,10 +15,16 @@ H() { setpriv --reuid="$UID_" --regid="$(id -g $U)" --init-groups env HOME=/home
         DBUS_SESSION_BUS_ADDRESS="unix:path=$RT/bus" PATH=/usr/local/bin:/usr/bin "$@"; }
 shot() { echo "RICE-SHOT $1"; sleep "${2:-14}"; }
 # optional: newer configs from the host tree (iterate without an ISO rebuild)
+# host overrides of /usr/share/graphite files (list in override/files.txt)
+for f in $(curl -fsS "@HOST@/override/files.txt" 2>/dev/null); do
+  curl -fsS "@HOST@/override/$f" -o "/usr/share/graphite/$f" && echo "RICE: override /usr/share/graphite/$f"
+  [[ $f == bin/* ]] && chmod 755 "/usr/share/graphite/$f"
+done
 if curl -fsS "@HOST@/override/hyprland.conf" -o /tmp/hl.conf 2>/dev/null; then
   install -o $U -m644 /tmp/hl.conf /home/$U/.config/hypr/hyprland.conf && echo "RICE: using host hyprland.conf override"
   sleep 5; H hyprctl reload >/dev/null 2>&1
 fi
+pkill -x hypridle || true   # no idle lock while the demo runs (the VM looks idle)
 sleep 60   # let waybar/wallpaper/mako settle (software rendering is slow)
 echo "RICE: configerrors: $(H hyprctl configerrors 2>&1 | tr '\n' ' ')"
 echo "RICE: layers: $(H hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | sort -u | tr '\n' ' ')"
@@ -35,6 +41,7 @@ H hyprctl dispatch exec "kitty" >/dev/null; sleep 30
 shot terminals 12
 for t in graphite-nord graphite-mocha graphite-light graphite-amber graphite-violet graphite-teal; do
   H graphite-theme set "$t"; sleep 45
+  echo "RICE: $t procs: $(pgrep -x waybar >/dev/null && echo waybar) $(pgrep -x swaybg >/dev/null && echo swaybg) $(pgrep -x hyprpaper >/dev/null && echo hyprpaper) kitty=$(pgrep -cx kitty)"
   shot "theme-$t" 10
 done
 H rofi -show drun & sleep 25; shot launcher-teal 8; pkill -x rofi; sleep 8

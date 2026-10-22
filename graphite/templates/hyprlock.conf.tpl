@@ -52,8 +52,8 @@ input-field {
     check_color = rgb({{accent2.hex}})
     fail_color = rgb({{red.hex}})
     capslock_color = rgb({{yellow.hex}})
-    placeholder_text = <span foreground="#{{muted.hex}}">  $USER</span>
-    fail_text = <span foreground="#{{red.hex}}">$FAIL</span>
+    placeholder_text = <span foreground="##{{muted.hex}}">  $USER</span>
+    fail_text = <span foreground="##{{red.hex}}">$FAIL</span>
     fade_on_empty = false
     font_family = Inter
     position = 0, -40
