@@ -1,0 +1,32 @@
+/* Graphite Waybar: floating pills. Colours: ~/.config/graphite/current/waybar.css */
+@import url("../graphite/current/waybar.css");
+
+* {
+  font-family: "Inter", "JetBrainsMono Nerd Font";
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 0;
+  border: none;
+}
+window#waybar { background: transparent; color: @foreground; }
+tooltip { background: alpha(@surface, 0.96); border: 1px solid @border; border-radius: 10px; }
+tooltip label { color: @foreground; }
+
+#custom-logo, #workspaces, #clock, #tray, #status, #custom-power {
+  background: alpha(@surface, 0.82);
+  border: 1px solid alpha(@border, 0.7);
+  border-radius: 17px;
+  padding: 0 12px;
+}
+#custom-logo { color: @accent; font-family: "JetBrainsMono Nerd Font"; font-size: 16px; padding: 0 13px 0 11px; }
+#workspaces { padding: 0 6px; }
+#workspaces button { color: @muted; padding: 0 7px; margin: 4px 1px; background: transparent; border-radius: 12px; font-weight: 600; }
+#workspaces button.active { color: @on_accent; background: @accent; }
+#workspaces button:hover { background: alpha(@accent, 0.12); box-shadow: none; }
+#clock { font-weight: 600; letter-spacing: 0.3px; }
+#network, #pulseaudio, #battery { font-family: "JetBrainsMono Nerd Font"; font-size: 15px; padding: 0 7px; color: @foreground; }
+#battery.warning { color: @yellow; }
+#battery.critical { color: @red; }
+#pulseaudio.muted, #network.disconnected { color: @muted; }
+#custom-power { color: @red; font-family: "JetBrainsMono Nerd Font"; font-size: 14px; padding: 0 13px 0 12px; }
+#custom-power:hover, #custom-logo:hover { background: alpha(@accent, 0.18); }

@@ -1,0 +1,11 @@
+git
+base-devel
+neovim
+code
+python
+python-pip
+rustup
+nodejs
+npm
+docker
+docker-compose

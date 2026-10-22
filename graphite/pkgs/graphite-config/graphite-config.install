@@ -1,0 +1,13 @@
+_identity() { systemd-tmpfiles --create 00-graphite-os-release.conf 2>/dev/null || ln -sf ../usr/lib/graphite-release /etc/os-release; }
+post_install() {
+  _identity
+  echo ":: Graphite: run 'graphite install' (or install.sh) to enable services and set up Snapper."
+  echo ":: Existing users get the defaults with: graphite install --no-packages --user <name>"
+}
+post_upgrade() {
+  _identity
+  echo ":: Graphite updated. Pending per-user migrations run with: graphite migrate"
+}
+pre_remove() {
+  ln -sf ../usr/lib/os-release /etc/os-release
+}

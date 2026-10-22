@@ -1,0 +1,5 @@
+# Optional NVIDIA stack, appended by ./build.sh --nvidia
+nvidia-open
+nvidia-utils
+lib32-nvidia-utils
+nvidia-settings

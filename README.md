@@ -1,42 +1,43 @@
-# GraphiteOS
+# Graphite
 
-An Arch Linux based live/installable distro built with **archiso** (releng profile as base), focused on a polished **Hyprland** desktop, **gaming**, and **programming**.
+An opinionated Arch Linux + **Hyprland** system for **gaming** and **programming**.
+The palette is graphite and dark grey with a single teal accent (`#5eead4`).
 
-## Goals
-- **Look:** graphite / dark-grey palette with a single teal accent (`#5eead4`), custom wallpaper, themed Waybar, rofi-wayland launcher, kitty, mako, hyprlock and a custom SDDM theme (`graphiteos`).
-- **Gaming:** Steam (multilib enabled), gamemode, MangoHud (themed), Lutris, Wine + winetricks, Vulkan for Mesa / AMD (RADV) / Intel (ANV) incl. 32-bit. NVIDIA (`nvidia-open`) is optional via `./build.sh --nvidia`. `SUPER+G` toggles a low-overhead Hyprland "game mode".
-- **Dev:** git, base-devel, neovim, Code - OSS (`code`), python + pip, rustup, nodejs + npm, docker + compose.
+Graphite has two install paths, and both come from one source tree, `graphite/`:
+1. **ISO.** The archiso profile in this repo embeds `graphite/` at `/opt/graphite`. The live session is set up by `install.sh --live`. `sudo graphite-iso-install` runs archinstall, copies `/opt/graphite` into the new system and runs `install.sh` there.
+2. **Install script on top of Arch.** Run `sudo ./graphite/install.sh --user "$USER"` from a checkout. `graphite/boot.sh` is the future `curl | bash` bootstrap. It is a stub for now because the repo is private.
 
 ## Layout
 | Path | Purpose |
 |---|---|
-| `profiledef.sh` | archiso profile (`iso_name=graphiteos`, BIOS syslinux + UEFI systemd-boot) |
-| `packages.x86_64` | releng packages + GraphiteOS desktop/gaming/dev packages |
-| `packages.nvidia.x86_64` | optional NVIDIA stack |
-| `pacman.conf` | releng pacman.conf with `[multilib]` enabled |
-| `airootfs/etc/skel/.config` | Hyprland, Waybar, rofi, kitty, mako, MangoHud configs |
-| `airootfs/etc/os-release` | GraphiteOS branding (`ID=graphiteos`, `ID_LIKE=arch`) |
-| `airootfs/etc/sddm.conf.d`, `airootfs/usr/share/sddm/themes/graphiteos` | themed SDDM, live autologin to Hyprland as `graphite` |
-| `build.sh` | build wrapper; `test-qemu.sh` headless boot test |
+| `graphite/install.sh` | Installer entry point. Runs the phases `install/{preflight,packages,system,config,post-install}.sh` |
+| `graphite/bin/` | `graphite` CLI, `graphite-migrate`, `graphite-iso-install`, wallpaper/welcome helpers |
+| `graphite/config/` | Default dotfiles: Hyprland, Waybar, rofi, kitty, mako, MangoHud. This is the only copy in the repo. |
+| `graphite/packages/*.txt` | desktop / graphics / gaming / dev / nvidia package lists. They are used by both the ISO and install.sh. |
+| `graphite/themes/graphite-teal/colors.toml` | Default theme palette. Theme switching comes in phase 2. |
+| `graphite/migrations/<unix-ts>.sh` | Idempotent update scripts, run once per user by `graphite update` |
+| `graphite/assets/` | Wallpaper, SDDM theme, os-release |
+| `profiledef.sh`, `packages.x86_64`, `airootfs/`, `grub/`, `syslinux/`, `efiboot/` | archiso (releng) profile. `packages.x86_64` holds only the releng base. |
+| `build.sh` | Stages a temp profile, adds `graphite/`, its package lists and its assets, then runs mkarchiso |
+| `test-qemu.sh` | Headless QEMU boot test |
 
-Live session: user `graphite` (no password, passwordless sudo). Root is locked like stock archiso. Kernel params include `console=ttyS0,115200` for serial debugging.
-
-## Build
-On Arch (as root, with `archiso` installed):
+## Using Graphite
 ```sh
-./build.sh            # ISO lands in ./out
-./build.sh --nvidia   # include NVIDIA drivers
+graphite help            # command center
+graphite update          # code update (stub until a public remote exists), pacman -Syu, pending migrations
+graphite migrate --pending
+graphite keybinds
 ```
-On any Linux with podman or docker (needs a **privileged** container, mkarchiso uses loop/mount/chroot):
+Configs live in `~/.config` and belong to you. If you re-run the installer, any file you changed is kept as `<file>.bak.<timestamp>`.
+
+## Build and test
 ```sh
-./build.sh --container
+./build.sh [--nvidia]              # on Arch, as root, with archiso
+./build.sh --container [--nvidia]  # any Linux with podman/docker (privileged)
+./test-qemu.sh bios 240            # serial log + screenshot in out/
 ```
 
-## Test
-```sh
-./test-qemu.sh bios 240   # serial log -> out/serial-bios.log, screenshot -> out/screen-bios.ppm
-./test-qemu.sh uefi 240   # needs OVMF (edk2-ovmf / ovmf package)
-```
+## License
 
-## Status
-Early scaffold. No installer yet (use `archinstall` from the live ISO). Planned: Calamares installer, own package repo, branded Plymouth.
+Copyright (C) 2026 Mathias Klassen / Nessalk Industries.
+Graphite is free software, licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later). See [LICENSE](LICENSE).

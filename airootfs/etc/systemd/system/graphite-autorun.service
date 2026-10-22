@@ -1,0 +1,13 @@
+[Unit]
+Description=Graphite live: fetch and run a script from graphite.autorun=URL (QEMU test harness)
+ConditionKernelCommandLine=graphite.autorun
+After=network-online.target graphite-home.service
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c 'url=$(sed -n "s/.*graphite\.autorun=\\([^ ]*\\).*/\\1/p" /proc/cmdline); curl -fsSL --retry 20 --retry-connrefused --retry-delay 3 -o /tmp/autorun.sh "$url" && bash /tmp/autorun.sh'
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=infinity
+[Install]
+WantedBy=multi-user.target

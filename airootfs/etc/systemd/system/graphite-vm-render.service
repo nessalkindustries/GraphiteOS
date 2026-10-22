@@ -1,0 +1,13 @@
+[Unit]
+Description=Graphite: provide a render node for software rendering in VMs without one (bochs/std VGA, QXL)
+# Only in virtual machines, and only if no GPU render node exists. Real hardware is never touched.
+ConditionVirtualization=vm
+Before=display-manager.service
+After=systemd-udev-settle.service systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c 'udevadm settle; ls /dev/dri/renderD* >/dev/null 2>&1 || modprobe vgem'
+
+[Install]
+WantedBy=multi-user.target

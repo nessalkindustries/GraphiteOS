@@ -1,0 +1,47 @@
+/* Graphite launcher. Colours: ~/.config/graphite/current/rofi.rasi (active theme) */
+configuration {
+    modi: "drun,run,window";
+    show-icons: true;
+    icon-theme: "Papirus-Dark";
+    font: "Inter 11";
+    drun-display-format: "{name}";
+    display-drun: "  Apps";
+    display-run: "  Run";
+    display-window: "  Windows";
+    hover-select: true;
+    me-select-entry: "";
+    me-accept-entry: "MousePrimary";
+}
+@import "~/.config/graphite/current/rofi.rasi"
+
+* { background-color: transparent; text-color: @fg; }
+window {
+    width: 560px;
+    background-color: @bg;
+    border: 2px;
+    border-color: @accent;
+    border-radius: 16px;
+    padding: 14px;
+}
+mainbox { spacing: 10px; children: [inputbar, listview, mode-switcher]; }
+inputbar {
+    background-color: @surface;
+    border-radius: 12px;
+    padding: 10px 14px;
+    spacing: 10px;
+    children: [prompt, entry];
+}
+prompt { text-color: @accent; }
+entry { placeholder: "Search"; placeholder-color: @muted; cursor: text; }
+listview { lines: 7; columns: 1; fixed-height: true; scrollbar: false; spacing: 4px; }
+element { padding: 8px 12px; border-radius: 10px; spacing: 12px; }
+element-icon { size: 24px; vertical-align: 0.5; }
+element-text { vertical-align: 0.5; text-color: inherit; }
+element normal.normal, element alternate.normal { background-color: transparent; text-color: @fg; }
+element normal.active, element alternate.active { background-color: transparent; text-color: @accent; }
+element selected.active { background-color: @overlay; text-color: @accent; }
+element selected.normal { background-color: @overlay; text-color: @accent; }
+mode-switcher { spacing: 6px; }
+button { padding: 6px; border-radius: 10px; text-color: @muted; }
+button selected { background-color: @surface; text-color: @accent; }
+message { background-color: @surface; border-radius: 10px; padding: 8px 12px; }

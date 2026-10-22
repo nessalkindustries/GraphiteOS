@@ -1,0 +1,54 @@
+[Plymouth Theme]
+Name=Graphite
+Description=Graphite boot splash (hexagon logo, teal accent)
+ModuleName=two-step
+
+[two-step]
+Font=Inter 12
+TitleFont=Inter Light 24
+ImageDir=/usr/share/plymouth/themes/graphite
+DialogHorizontalAlignment=.5
+DialogVerticalAlignment=.62
+TitleHorizontalAlignment=.5
+TitleVerticalAlignment=.38
+HorizontalAlignment=.5
+VerticalAlignment=.70
+WatermarkHorizontalAlignment=.5
+WatermarkVerticalAlignment=.40
+Transition=none
+TransitionDuration=0.0
+BackgroundStartColor=0x18191c
+BackgroundEndColor=0x18191c
+ProgressBarBackgroundColor=0x2c2f34
+ProgressBarForegroundColor=0x5eead4
+MessageBelowAnimation=true
+
+[boot-up]
+UseEndAnimation=false
+
+[shutdown]
+UseEndAnimation=false
+
+[reboot]
+UseEndAnimation=false
+
+[updates]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Installing updates…
+SubTitle=Do not turn off your computer
+
+[system-upgrade]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Upgrading system…
+SubTitle=Do not turn off your computer
+
+[firmware-upgrade]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Upgrading firmware…
+SubTitle=Do not turn off your computer

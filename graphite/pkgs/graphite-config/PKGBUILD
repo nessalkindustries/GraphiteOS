@@ -1,0 +1,52 @@
+# shellcheck shell=bash disable=SC2034,SC2154
+# Graphite defaults: CLI, themes, migrations, skel configs, system drop-ins.
+# Never overwrites files owned by other packages (rule: overlay, not replacement).
+pkgname=graphite-config
+pkgver=0.3.0
+pkgrel=2
+pkgdesc="Graphite defaults: CLI, themes, user config skeleton, system drop-ins"
+arch=(any)
+url="https://github.com/Skeleten80/GraphiteOS"
+license=(MIT)
+depends=(bash curl python sudo nftables zram-generator power-profiles-daemon
+         snapper snap-pac grub-btrfs inotify-tools pacman-contrib reflector
+         fwupd arch-audit)
+backup=(etc/graphite/nftables.conf etc/systemd/zram-generator.conf
+        etc/sysctl.d/90-graphite.conf etc/sddm.conf.d/10-graphite.conf)
+install=graphite-config.install
+
+package() {
+  local src=${GRAPHITE_SRC:-$startdir/../..}
+  local share="$pkgdir/usr/share/graphite"
+  install -d "$share" "$pkgdir/usr/bin"
+  cp -r "$src"/{bin,migrations,themes,templates,install} "$share/"
+  install -m644 "$src/VERSION" "$share/VERSION"
+  install -m755 "$src/install.sh" "$share/install.sh"
+  local f
+  for f in "$src"/bin/*; do ln -s "/usr/share/graphite/bin/$(basename "$f")" "$pkgdir/usr/bin/$(basename "$f")"; done
+  # user configs: new users get them via /etc/skel
+  install -d "$pkgdir/etc/skel/.config"
+  cp -r "$src"/config/. "$pkgdir/etc/skel/.config/"
+  # launcher declutter: per-user NoDisplay overrides (pacman never touches ~/.local)
+  install -Dm644 -t "$pkgdir/etc/skel/.local/share/applications" "$src"/local-apps/*.desktop
+  # assets
+  install -Dm644 -t "$pkgdir/usr/share/backgrounds/graphite" "$src"/assets/backgrounds/*
+  install -Dm644 "$src/assets/fastfetch/logo.txt" "$share/fastfetch/logo.txt"
+  install -Dm644 -t "$pkgdir/usr/share/plymouth/themes/graphite" "$src"/assets/plymouth/graphite/*
+  install -d "$pkgdir/usr/share/sddm/themes/graphite"
+  cp -r "$src"/assets/sddm-theme/. "$pkgdir/usr/share/sddm/themes/graphite/"
+  # system drop-ins (files no other package owns)
+  install -Dm644 "$src/system/etc/sddm.conf.d/10-graphite.conf" "$pkgdir/etc/sddm.conf.d/10-graphite.conf"
+  install -Dm644 "$src/system/etc/sysctl.d/90-graphite.conf" "$pkgdir/etc/sysctl.d/90-graphite.conf"
+  install -Dm644 "$src/system/etc/systemd/zram-generator.conf" "$pkgdir/etc/systemd/zram-generator.conf"
+  install -Dm440 "$src/system/etc/sudoers.d/10-graphite-wheel" "$pkgdir/etc/sudoers.d/10-graphite-wheel"
+  install -Dm644 "$src/system/etc/graphite/nftables.conf" "$pkgdir/etc/graphite/nftables.conf"
+  install -Dm644 "$src/system/usr/lib/systemd/system/graphite-firewall.service" \
+    "$pkgdir/usr/lib/systemd/system/graphite-firewall.service"
+  install -Dm644 "$src/system/graphite-release" "$pkgdir/usr/lib/graphite-release"
+  install -Dm644 "$src/system/usr/lib/tmpfiles.d/00-graphite-os-release.conf" \
+    "$pkgdir/usr/lib/tmpfiles.d/00-graphite-os-release.conf"
+  find "$share" "$pkgdir/etc/skel" -type f -name '*.sh' -exec chmod 755 {} +
+  chmod 755 "$share"/bin/* "$share/install.sh"
+  chmod 750 "$pkgdir/etc/sudoers.d"
+}

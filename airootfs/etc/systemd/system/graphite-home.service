@@ -1,0 +1,10 @@
+[Unit]
+Description=Graphite: set up the live user's home from /opt/graphite (install.sh --live)
+Before=display-manager.service
+ConditionPathExists=/opt/graphite/install.sh
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+ExecStart=/usr/bin/bash /opt/graphite/install.sh --live --user graphite
+[Install]
+WantedBy=multi-user.target

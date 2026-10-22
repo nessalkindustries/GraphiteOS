@@ -1,0 +1,10 @@
+[Unit]
+Description=Graphite live: set timezone from graphite.tz= kernel parameter
+ConditionKernelCommandLine=graphite.tz
+DefaultDependencies=no
+Before=sysinit.target time-set.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c 'tz=$(sed -n "s/.*graphite\.tz=\\([^ ]*\\).*/\\1/p" /proc/cmdline); [ -e "/usr/share/zoneinfo/$tz" ] && ln -sf "/usr/share/zoneinfo/$tz" /etc/localtime'
+[Install]
+WantedBy=sysinit.target

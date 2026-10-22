@@ -1,0 +1,29 @@
+# shellcheck shell=bash disable=SC2034,SC2154
+# Graphite meta-packages: dependency lists only (generated from packages/*.txt).
+pkgbase=graphite-meta
+pkgname=(graphite-desktop graphite-gaming graphite-dev graphite-nvidia)
+pkgver=0.3.0
+pkgrel=1
+arch=(any)
+url="https://github.com/Skeleten80/GraphiteOS"
+license=(MIT)
+
+_list() { sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "${GRAPHITE_SRC:-$startdir/../..}/packages/$1.txt"; }
+
+package_graphite-desktop() {
+  pkgdesc="Graphite Hyprland desktop + graphics stack"
+  mapfile -t depends < <(_list desktop; _list graphics)
+  depends+=(graphite-config networkmanager)
+}
+package_graphite-gaming() {
+  pkgdesc="Graphite gaming stack (Steam, gamemode, MangoHud, Lutris, Wine)"
+  mapfile -t depends < <(_list gaming)
+}
+package_graphite-dev() {
+  pkgdesc="Graphite developer tools"
+  mapfile -t depends < <(_list dev)
+}
+package_graphite-nvidia() {
+  pkgdesc="Graphite NVIDIA driver stack (nvidia-open)"
+  mapfile -t depends < <(_list nvidia)
+}
