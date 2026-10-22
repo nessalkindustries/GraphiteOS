@@ -36,3 +36,8 @@ Configs live in `~/.config` and belong to you. If you re-run the installer, any 
 ./build.sh --container [--nvidia]  # any Linux with podman/docker (privileged)
 ./test-qemu.sh bios 240            # serial log + screenshot in out/
 ```
+
+## License
+
+Copyright (C) 2026 Mathias Klassen / Nessalk Industries.
+Graphite is free software, licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later). See [LICENSE](LICENSE).
