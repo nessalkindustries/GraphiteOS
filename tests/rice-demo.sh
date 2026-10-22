@@ -24,7 +24,7 @@ if curl -fsS "@HOST@/override/hyprland.conf" -o /tmp/hl.conf 2>/dev/null; then
   install -o $U -m644 /tmp/hl.conf /home/$U/.config/hypr/hyprland.conf && echo "RICE: using host hyprland.conf override"
   sleep 5; H hyprctl reload >/dev/null 2>&1
 fi
-pkill -x hypridle || true   # no idle lock while the demo runs (the VM looks idle)
+( for _ in $(seq 200); do pkill -x hypridle; sleep 5; done ) &   # no idle lock during the demo (hypridle may start late; the VM looks idle)
 sleep 60   # let waybar/wallpaper/mako settle (software rendering is slow)
 echo "RICE: configerrors: $(H hyprctl configerrors 2>&1 | tr '\n' ' ')"
 echo "RICE: layers: $(H hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | sort -u | tr '\n' ' ')"
