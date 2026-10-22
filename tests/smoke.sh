@@ -18,7 +18,24 @@ check "network: reach host" 'curl -fsS -m 10 -o /dev/null @HOST@/selftest.sh'
 check "DRM device present" 'ls /dev/dri/card*'
 drv=$(basename "$(readlink -f /sys/class/drm/card*/device/driver 2>/dev/null | head -1)")
 echo "SMOKE: diag drm driver=$drv"
-gl=$(grep -ahoE "(GL_RENDERER|Renderer)[^\"]{0,80}" "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.log" 2>/dev/null | head -1)
+hl="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.log"
+gl=$(grep -aiohE "GL_RENDERER[^\"]{0,80}|renderer: [^\"]{0,80}" "$hl" 2>/dev/null | head -1)
+[ -n "$gl" ] || gl=$(grep -aohE "Renderer[^\"]{0,80}" "$hl" 2>/dev/null | head -1)
 echo "SMOKE: diag gl=$gl"
 check "GL renderer reported by Hyprland" '[ -n "$gl" ]'
+# theme switch must leave a drawn bar (regression: waybar missing after a switch)
+graphite-theme set graphite-nord >/dev/null 2>&1; sleep 25
+echo "SMOKE: SHOT theme-nord"; sleep 10
+check "waybar back after theme switch (layer mapped)" 'pgrep -x waybar && hyprctl layers | grep -q waybar'
+nord=$(sed -n 's/^accent *= *"\(#[0-9a-fA-F]*\)".*/\1/p' /usr/share/graphite/themes/graphite-nord/colors.toml)
+check "kitty colours follow theme (nord accent $nord)" 'grep -qi "$nord" ~/.config/graphite/current/kitty.conf'
+graphite-theme set graphite-teal >/dev/null 2>&1; sleep 25
+check "waybar back after switching to graphite-teal" 'pgrep -x waybar && hyprctl layers | grep -q waybar'
+# Quickshell bar prototype (diagnostic only; Waybar is the default)
+if command -v qs >/dev/null; then
+  hyprctl dispatch exec "qs -c graphite-bar" >/dev/null 2>&1; sleep 20
+  echo "SMOKE: diag quickshell prototype running=$(pgrep -x qs >/dev/null && echo yes || echo no) layer=$(hyprctl layers | grep -c quickshell)"
+  echo "SMOKE: SHOT quickshell-bar"; sleep 15
+  pkill -x qs 2>/dev/null
+fi
 echo "SMOKE: DONE fails=$fails"

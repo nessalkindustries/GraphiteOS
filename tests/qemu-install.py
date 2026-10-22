@@ -155,6 +155,13 @@ if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.gl
             send(p, f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.time()
         for m in re.findall(r"@SMOKE: ([^\r\n]*)[\r\n]", text):
             if ("sm", m) not in st: st[("sm", m)] = 1; note("SMOKE: " + m)
+            if m.startswith("SHOT ") and ("shotx", m) not in st:
+                st[("shotx", m)] = 1; name = m.split()[1]; x = os.path.join(OUT, f"smoke-{name}.ppm")
+                s3 = socket.socket(socket.AF_UNIX); s3.connect(sock); s3.send(f"screendump {x}\n".encode()); time.sleep(3); s3.close()
+                try:
+                    from PIL import Image
+                    Image.open(x).save(x[:-4] + ".png"); os.remove(x); note(f"screenshot: out/harness/smoke-{name}.png")
+                except Exception as e: note(f"smoke shot {name} failed: {e}")
         if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.time() - st["st"] > 600):
             st["shot"] = 1; time.sleep(20)   # let the kitty opened by smoke.sh draw
             s2 = socket.socket(socket.AF_UNIX); s2.connect(sock)

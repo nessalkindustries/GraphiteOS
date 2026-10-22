@@ -6,6 +6,7 @@ hypridle
 xdg-desktop-portal-hyprland
 xdg-desktop-portal-gtk
 waybar
+quickshell
 rofi
 rofi-emoji
 cliphist
