@@ -22,6 +22,7 @@ Usage: graphite <command> [args]
   keybinds                    keybinding cheatsheet (also Super+K)
   snapshots                   list Snapper snapshots of /
   rollback N                  make snapshot N the new root (reboot afterwards)
+  secureboot status|plan|setup|sign|verify   opt-in Secure Boot with sbctl (docs/secure-boot.md)
   doctor                      health checks (services, portals, snapshots, firewall, zram)
   install [args]              run the installer (install.sh)
   version | debug | help
@@ -193,6 +194,7 @@ case $cmd in
   snapshots) snapshots ;;
   rollback) rollback "$@" ;;
   splash) splash "$@" ;;
+  secureboot) exec graphite-secureboot "$@" ;;
   doctor) doctor ;;
   install) exec "$GRAPHITE_PATH/install.sh" "$@" ;;
   version) cat "$GRAPHITE_PATH/VERSION" ;;
