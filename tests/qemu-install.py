@@ -41,6 +41,8 @@ LIVE_SCRIPT = "patch-selftest.sh" if ("--patch-selftest" in sys.argv and "--keep
 shutil.copy(os.path.join(ROOT, "tests", "selftest.sh"), www)
 open(os.path.join(www, "smoke.sh"), "w").write(open(os.path.join(ROOT, "tests", "smoke.sh")).read().replace("@HOST@", host))
 shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite"), os.path.join(www, "graphite-bin"))
+if "--overlay-installer" in sys.argv:  # test a fixed installer without rebuilding the ISO
+    shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite-iso-install"), os.path.join(www, "graphite-iso-install"))
 if os.path.isdir("/var/cache/graphite-pkg"):
     os.symlink("/var/cache/graphite-pkg", os.path.join(www, "pkg"))
 class Quiet(http.server.SimpleHTTPRequestHandler):

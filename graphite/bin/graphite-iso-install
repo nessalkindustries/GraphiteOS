@@ -113,7 +113,10 @@ sed '/^\[graphite\]/,/^$/d' /etc/pacman.conf > "$CONF"
 grep -q '^\[multilib\]' "$CONF" || printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> "$CONF"
 printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$REPO_SRC" >> "$CONF"
 [[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[\(core\|extra\|multilib\)\]$/a CacheServer = $GRAPHITE_CACHE_SERVER" "$CONF"
-pacstrap -C "$CONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
+# pacstrap only needs the official repos; a signed [graphite] db would fail here
+# because its key is not in the live keyring (it is trusted in the target below)
+PSCONF=$(mktemp); sed '/^\[graphite\]/,$d' "$CONF" > "$PSCONF"
+pacstrap -C "$PSCONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
   btrfs-progs cryptsetup grub efibootmgr sudo networkmanager nano vim man-db
 
 log "Configuring target"
