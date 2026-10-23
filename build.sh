@@ -19,6 +19,8 @@ NVIDIA=0; CONTAINER=0
 for a in "$@"; do case $a in --nvidia) NVIDIA=1;; --container) CONTAINER=1;; *) echo "unknown arg $a"; exit 1;; esac; done
 OUT=${OUT:-$PWD/out}; WORK=${WORK:-/tmp/graphite-work}
 PKGCACHE=${PKGCACHE:-/var/cache/graphite-pkg}
+# our own packages come from the local repo; never reuse a stale same-version copy from the shared cache
+sudo rm -f "$PKGCACHE"/graphite-*.pkg.tar.zst* 2>/dev/null || rm -f "$PKGCACHE"/graphite-*.pkg.tar.zst* 2>/dev/null || true
 mkdir -p "$OUT"
 if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
   SOURCE_DATE_EPOCH=$(git log -1 --format=%ct 2>/dev/null || date +%s)
