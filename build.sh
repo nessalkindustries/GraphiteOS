@@ -55,6 +55,8 @@ if [ -n "$GRAPHITE_SNAPSHOT" ]; then
 fi
 if [ -f "$OUT/graphite-repo/graphite.pub" ]; then
   # signed repo: trust exactly this key, require valid signatures on packages and db
+  # the archlinux container image ships without the keyring's local master key
+  pacman-key --list-secret-keys 2>/dev/null | grep -q . || pacman-key --init >/dev/null
   pacman-key --add "$OUT/graphite-repo/graphite.pub" >/dev/null
   pacman-key --lsign-key "$(cat "$OUT/graphite-repo/graphite.fpr")" >/dev/null
   printf '\n[graphite]\nSigLevel = Required\nServer = file://%s\n' "$OUT/graphite-repo" >> "$PROFILE/pacman.conf"
