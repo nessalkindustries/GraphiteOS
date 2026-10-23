@@ -56,6 +56,10 @@ if command -v qs >/dev/null; then
   echo "SMOKE: diag quickshell prototype running=$(pgrep -x qs >/dev/null && echo yes || echo no) layer=$(hyprctl layers | grep -c 'namespace: quickshell')"
   echo "SMOKE: SHOT quickshell-bar"; sleep 15
   check "quickshell prototype bar mapped" "hyprctl layers | grep -q 'namespace: quickshell'"
-  pkill -x qs 2>/dev/null; hyprctl dispatch exec "exec waybar >>$wblog 2>&1" >/dev/null; barup 30
+  # restore the default bar (cleanup, not a check). Wait until qs has really exited and its layer is
+  # gone before relaunching, and bound the wait so it can never outlive the harness smoke deadline.
+  pkill -x qs 2>/dev/null; for _ in $(seq 20); do pgrep -x qs >/dev/null || break; sleep 0.5; done; pkill -9 -x qs 2>/dev/null
+  pgrep -x waybar >/dev/null || timeout 10 hyprctl dispatch exec "exec waybar >>$wblog 2>&1" >/dev/null 2>&1
+  barup 10 || echo "SMOKE: diag waybar not back after quickshell (cleanup only): $(tail -3 $wblog 2>/dev/null | tr '\n' '|')"
 fi
 echo "SMOKE: DONE fails=$fails"

@@ -164,7 +164,7 @@ if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.gl
                     from PIL import Image
                     Image.open(x).save(x[:-4] + ".png"); os.remove(x); note(f"screenshot: out/harness/smoke-{name}.png")
                 except Exception as e: note(f"smoke shot {name} failed: {e}")
-        if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.time() - st["st"] > 600):
+        if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.time() - st["st"] > 1200):   # TCG: full smoke takes ~10-13 min
             st["shot"] = 1; time.sleep(20)   # let the kitty opened by smoke.sh draw
             s2 = socket.socket(socket.AF_UNIX); s2.connect(sock)
             s2.send(f"screendump {ppm}\n".encode()); time.sleep(3)
