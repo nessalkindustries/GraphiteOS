@@ -47,7 +47,7 @@ common_checks() {
   check "portals installed" 'pacman -Q xdg-desktop-portal-hyprland xdg-desktop-portal-gtk'
   # milestone base-1: opt-in Secure Boot tooling, signed repo, build manifest
   say "diag secureboot: $(graphite secureboot status 2>&1 | tr '\n' ';')"
-  check "graphite secureboot status (UEFI, read-only)" 'graphite secureboot status | grep -q "firmware:     UEFI"'
+  check "graphite secureboot status (UEFI, read-only)" 'o=$(graphite secureboot status 2>&1) && [[ $o == *"firmware:     UEFI"* ]]'
   check "secure boot stays opt-in (sbctl not installed by default)" '! pacman -Q sbctl'
   check "secureboot plan targets GRUB + both kernels" 'p=$(graphite secureboot plan); grep -q grubx64.efi <<<"$p" && grep -q vmlinuz-linux-lts <<<"$p"'
   if [[ -f /var/lib/graphite/repo/graphite.pub ]]; then

@@ -13,7 +13,9 @@ FALLBACK_EFI="$ESP/EFI/BOOT/BOOTX64.EFI"
 
 efivar() { # print the byte value of an EFI global variable (SecureBoot, SetupMode)
   local f; f=$(ls /sys/firmware/efi/efivars/"$1"-8be4df61-* 2>/dev/null | head -1)
-  [[ -n $f ]] && od -An -t u1 -j4 -N1 "$f" | tr -d ' ' || echo "?"
+  # efivarfs does not support seeking (od -j returned nothing): read sequentially. First 4 bytes are attributes.
+  [[ -n $f && -r $f ]] || { echo "?"; return 0; }
+  local v; v=$(head -c5 "$f" 2>/dev/null | tail -c1 | od -An -t u1 | tr -d ' \n'); echo "${v:-?}"
 }
 kernels() { ls "$ESP"/vmlinuz-* 2>/dev/null; }
 targets() { kernels; [[ -f $GRUB_EFI ]] && echo "$GRUB_EFI"; [[ -f $FALLBACK_EFI ]] && echo "$FALLBACK_EFI"; return 0; }
@@ -22,8 +24,8 @@ status() {
   if [[ ! -d /sys/firmware/efi ]]; then echo "firmware:     legacy BIOS (Secure Boot not available)"; return 0; fi
   local sb sm; sb=$(efivar SecureBoot); sm=$(efivar SetupMode)
   echo "firmware:     UEFI"
-  echo "secure boot:  $([[ $sb == 1 ]] && echo enabled || { [[ $sb == 0 ]] && echo disabled || echo unknown; })"
-  echo "setup mode:   $([[ $sm == 1 ]] && echo "yes (keys can be enrolled)" || { [[ $sm == 0 ]] && echo "no (clear keys in firmware first)" || echo unknown; })"
+  echo "secure boot:  $([[ $sb == 1 ]] && echo enabled || { [[ $sb == 0 ]] && echo disabled || echo "not reported (no SecureBoot variable: firmware without Secure Boot, or not enrolled)"; })"
+  echo "setup mode:   $([[ $sm == 1 ]] && echo "yes (keys can be enrolled)" || { [[ $sm == 0 ]] && echo "no (clear keys in firmware first)" || echo "not reported (treat as setup mode / not enrolled)"; })"
   if command -v sbctl >/dev/null; then
     echo "sbctl:        installed ($(pacman -Q sbctl 2>/dev/null | cut -d' ' -f2))"
     [[ -d /var/lib/sbctl/keys || -d /usr/share/secureboot/keys ]] && echo "keys:         created" || echo "keys:         none"
