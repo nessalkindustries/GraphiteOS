@@ -23,7 +23,8 @@ mkdir -p "$OUT"
 if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
   SOURCE_DATE_EPOCH=$(git log -1 --format=%ct 2>/dev/null || date +%s)
 fi
-export SOURCE_DATE_EPOCH GRAPHITE_SNAPSHOT=${GRAPHITE_SNAPSHOT:-} GRAPHITE_SIGN_KEY=${GRAPHITE_SIGN_KEY:-}
+GRAPHITE_COMMIT=${GRAPHITE_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}
+export GRAPHITE_COMMIT SOURCE_DATE_EPOCH GRAPHITE_SNAPSHOT=${GRAPHITE_SNAPSHOT:-} GRAPHITE_SIGN_KEY=${GRAPHITE_SIGN_KEY:-}
 
 if [ "$CONTAINER" = 1 ]; then
   ENG=$(command -v podman || command -v docker) || { echo "need podman or docker"; exit 1; }
@@ -32,7 +33,7 @@ if [ "$CONTAINER" = 1 ]; then
   GNUPGMNT=""; [ -n "$GRAPHITE_SIGN_KEY" ] && GNUPGMNT="-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg"
   # shellcheck disable=SC2086
   exec sudo "$ENG" run --rm --privileged --network host -v "$PWD":/src -v "$OUT":/src/out $GNUPGMNT \
-    -e SOURCE_DATE_EPOCH -e GRAPHITE_SNAPSHOT -e GRAPHITE_SIGN_KEY \
+    -e GRAPHITE_COMMIT -e SOURCE_DATE_EPOCH -e GRAPHITE_SNAPSHOT -e GRAPHITE_SIGN_KEY \
     -v "$PKGCACHE":/var/cache/pacman/pkg docker.io/archlinux/archlinux:latest \
     bash -c "pacman -Syu --noconfirm --needed archiso base-devel && cd /src && OUT=/src/out WORK=/tmp/work ./build.sh $ARGS"
 fi
@@ -77,7 +78,7 @@ done < <(find graphite -type f -perm -u+x | sort)
 [ "$NVIDIA" = 1 ] && sed -i 's/^iso_name=.*/iso_name="graphite-nvidia"/' "$PROFILE/profiledef.sh"
 
 # build manifest: everything needed to rebuild the same ISO
-{ echo "commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+{ echo "commit=$GRAPHITE_COMMIT"
   echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
   echo "snapshot=${GRAPHITE_SNAPSHOT:-live-mirrors}"
   echo "archiso=$(pacman -Q archiso | cut -d' ' -f2)"
