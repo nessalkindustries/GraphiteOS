@@ -13,7 +13,7 @@ if [[ ${1:-} == --container ]]; then
   ENG=$(command -v podman || command -v docker) || { echo "need podman or docker" >&2; exit 1; }
   mkdir -p "$REPO_OUT"
   exec sudo "$ENG" run --rm --network host -v "$PWD":/src:ro -v "$REPO_OUT":/repo docker.io/archlinux/archlinux:latest \
-    -e GRAPHITE_SIGN_KEY -e SOURCE_DATE_EPOCH ${GRAPHITE_SIGN_KEY:+-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg} \
+    -e GRAPHITE_SIGN_KEY="${GRAPHITE_SIGN_KEY:-}" -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" ${GRAPHITE_SIGN_KEY:+-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg} \
     bash -c "pacman -Sy --noconfirm --needed base-devel >/dev/null && REPO_OUT=/repo /src/tools/build-repo.sh"
 fi
 command -v makepkg >/dev/null || { echo "makepkg not found (use --container)" >&2; exit 1; }

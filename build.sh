@@ -33,7 +33,7 @@ if [ "$CONTAINER" = 1 ]; then
   GNUPGMNT=""; [ -n "$GRAPHITE_SIGN_KEY" ] && GNUPGMNT="-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg"
   # shellcheck disable=SC2086
   exec sudo "$ENG" run --rm --privileged --network host -v "$PWD":/src -v "$OUT":/src/out $GNUPGMNT \
-    -e GRAPHITE_COMMIT -e SOURCE_DATE_EPOCH -e GRAPHITE_SNAPSHOT -e GRAPHITE_SIGN_KEY \
+    -e GRAPHITE_COMMIT="$GRAPHITE_COMMIT" -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -e GRAPHITE_SNAPSHOT="$GRAPHITE_SNAPSHOT" -e GRAPHITE_SIGN_KEY="$GRAPHITE_SIGN_KEY" \
     -v "$PKGCACHE":/var/cache/pacman/pkg docker.io/archlinux/archlinux:latest \
     bash -c "pacman -Syu --noconfirm --needed archiso base-devel && cd /src && OUT=/src/out WORK=/tmp/work ./build.sh $ARGS"
 fi
