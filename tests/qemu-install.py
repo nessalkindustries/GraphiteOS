@@ -19,7 +19,7 @@ args = [a for a in sys.argv[1:] if not a.startswith("--")]
 PROFILE = "full" if "--profile=full" in sys.argv or ("--profile" in sys.argv and sys.argv[sys.argv.index("--profile")+1] == "full") else "desktop"
 ISO = args[0] if args else max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
 LUKS = "graphite-luks"
-PORT = 8765
+PORT = int(os.environ.get("GRAPHITE_HARNESS_PORT", "8765"))
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS_SRC = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 os.makedirs(OUT, exist_ok=True)
