@@ -59,6 +59,8 @@ render() {
 }
 
 reload_desktop() {
+  # never let a stuck compositor socket hang the caller (smoke run 1 hung in a theme switch)
+  hyprctl() { timeout 10 /usr/bin/hyprctl "$@"; }   # timeout execs the binary; "command" is a shell builtin, not an executable
   # GTK apps follow the gsettings keys live (needs a session bus; harmless without one)
   if command -v gsettings >/dev/null && [[ -n ${DBUS_SESSION_BUS_ADDRESS:-} ]]; then
     # shellcheck disable=SC1091

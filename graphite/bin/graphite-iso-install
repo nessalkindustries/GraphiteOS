@@ -113,7 +113,10 @@ sed '/^\[graphite\]/,/^$/d' /etc/pacman.conf > "$CONF"
 grep -q '^\[multilib\]' "$CONF" || printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> "$CONF"
 printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$REPO_SRC" >> "$CONF"
 [[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[\(core\|extra\|multilib\)\]$/a CacheServer = $GRAPHITE_CACHE_SERVER" "$CONF"
-pacstrap -C "$CONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
+# pacstrap only needs the official repos; a signed [graphite] db would fail here
+# because its key is not in the live keyring (it is trusted in the target below)
+PSCONF=$(mktemp); sed '/^\[graphite\]/,$d' "$CONF" > "$PSCONF"
+pacstrap -C "$PSCONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
   btrfs-progs cryptsetup grub efibootmgr sudo networkmanager nano vim man-db
 
 log "Configuring target"
@@ -124,6 +127,14 @@ install -d "$MNT/var/lib/graphite"
 cp -a "$REPO_SRC" "$MNT/var/lib/graphite/repo"
 cp -a "$GRAPHITE_SRC" "$MNT/var/lib/graphite/src"
 sed -e "s#file://$REPO_SRC#file:///var/lib/graphite/repo#" -e '/^CacheServer/d' "$CONF" > "$MNT/etc/pacman.conf"
+# signed [graphite] repo (build.sh with GRAPHITE_SIGN_KEY): trust only that key
+# in the target keyring and require valid package + database signatures
+if [[ -f $REPO_SRC/graphite.pub ]]; then
+  log "[graphite] repo is signed: importing its key and requiring signatures"
+  arch-chroot "$MNT" pacman-key --add /var/lib/graphite/repo/graphite.pub >/dev/null
+  arch-chroot "$MNT" pacman-key --lsign-key "$(cat "$REPO_SRC/graphite.fpr")" >/dev/null
+  sed -i '/^\[graphite\]/,/^$/s/^SigLevel = .*/SigLevel = Required/' "$MNT/etc/pacman.conf"
+fi
 [[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[\(core\|extra\|multilib\)\]$/a CacheServer = $GRAPHITE_CACHE_SERVER" "$MNT/etc/pacman.conf"
 ln -sf "/usr/share/zoneinfo/$TZ_" "$MNT/etc/localtime"
 echo "$HOSTNAME_" > "$MNT/etc/hostname"

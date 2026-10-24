@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Graphite Secure Boot (opt-in) via sbctl: own keys, signed GRUB + kernels.
+# Nothing happens unless you run `graphite secureboot setup`. See docs/secure-boot.md.
+#   graphite secureboot status          firmware/sbctl state (read-only)
+#   graphite secureboot plan            print what setup would do (read-only)
+#   graphite secureboot setup [--microsoft|--no-microsoft] [--yes]
+#   graphite secureboot sign            re-sign everything sbctl tracks
+#   graphite secureboot verify          list signed/unsigned EFI binaries
+set -euo pipefail
+ESP=${GRAPHITE_ESP:-/boot}
+GRUB_EFI="$ESP/EFI/Graphite/grubx64.efi"
+FALLBACK_EFI="$ESP/EFI/BOOT/BOOTX64.EFI"
+
+efivar() { # print the byte value of an EFI global variable (SecureBoot, SetupMode)
+  local f; f=$(ls /sys/firmware/efi/efivars/"$1"-8be4df61-* 2>/dev/null | head -1)
+  # efivarfs does not support seeking (od -j returned nothing): read sequentially. First 4 bytes are attributes.
+  [[ -n $f && -r $f ]] || { echo "?"; return 0; }
+  local v; v=$(head -c5 "$f" 2>/dev/null | tail -c1 | od -An -t u1 | tr -d ' \n'); echo "${v:-?}"
+}
+kernels() { ls "$ESP"/vmlinuz-* 2>/dev/null; }
+targets() { kernels; [[ -f $GRUB_EFI ]] && echo "$GRUB_EFI"; [[ -f $FALLBACK_EFI ]] && echo "$FALLBACK_EFI"; return 0; }
+
+status() {
+  if [[ ! -d /sys/firmware/efi ]]; then echo "firmware:     legacy BIOS (Secure Boot not available)"; return 0; fi
+  local sb sm; sb=$(efivar SecureBoot); sm=$(efivar SetupMode)
+  echo "firmware:     UEFI"
+  echo "secure boot:  $([[ $sb == 1 ]] && echo enabled || { [[ $sb == 0 ]] && echo disabled || echo "not reported (no SecureBoot variable: firmware without Secure Boot, or not enrolled)"; })"
+  echo "setup mode:   $([[ $sm == 1 ]] && echo "yes (keys can be enrolled)" || { [[ $sm == 0 ]] && echo "no (clear keys in firmware first)" || echo "not reported (treat as setup mode / not enrolled)"; })"
+  if command -v sbctl >/dev/null; then
+    echo "sbctl:        installed ($(pacman -Q sbctl 2>/dev/null | cut -d' ' -f2))"
+    [[ -d /var/lib/sbctl/keys || -d /usr/share/secureboot/keys ]] && echo "keys:         created" || echo "keys:         none"
+  else
+    echo "sbctl:        not installed (opt-in: graphite secureboot setup)"
+  fi
+  echo "boot files:   $(targets | tr '\n' ' ')"
+}
+
+plan() {
+  local ms=$1
+  cat <<P
+graphite secureboot setup would:
+  1. pacman -S --needed sbctl
+  2. check the firmware is in Setup Mode (abort otherwise)
+  3. sbctl create-keys
+  4. sbctl enroll-keys $([[ $ms == 1 ]] && echo "--microsoft  (keeps Microsoft keys: GPU option ROMs, dual boot)" || echo "(own keys only; risky on hardware with option ROMs)")
+  5. grub-install --target=x86_64-efi --efi-directory=$ESP --bootloader-id=Graphite \\
+       --modules="tpm" --disable-shim-lock   (+ --removable copy)
+  6. sbctl sign -s for: $(targets | tr '\n' ' ')
+     (-s saves them; sbctl's pacman hook re-signs on every kernel/GRUB update)
+  7. sbctl verify
+Then reboot, enable Secure Boot in the firmware, and run: graphite secureboot status
+P
+}
+
+need_root() { [[ $EUID -eq 0 ]] || exec sudo "$0" "$@"; }
+
+setup() {
+  local ms=1 yes=0
+  while (($#)); do case $1 in --microsoft) ms=1;; --no-microsoft) ms=0;; --yes|-y) yes=1;; *) echo "unknown option $1" >&2; exit 1;; esac; shift; done
+  need_root setup "$@"
+  [[ -d /sys/firmware/efi ]] || { echo "error: not booted in UEFI mode" >&2; exit 1; }
+  plan "$ms"
+  if ((!yes)); then read -r -p "Proceed? [y/N] " a; [[ $a == [yY]* ]] || exit 1; fi
+  pacman -S --needed --noconfirm sbctl
+  [[ $(efivar SetupMode) == 1 ]] || { echo "error: firmware is not in Setup Mode. Reboot into firmware setup, clear/reset Secure Boot keys, then rerun." >&2; exit 1; }
+  [[ -d /var/lib/sbctl/keys || -d /usr/share/secureboot/keys ]] || sbctl create-keys
+  if ((ms)); then sbctl enroll-keys --microsoft; else sbctl enroll-keys --yes-this-might-brick-my-machine; fi
+  grub-install --target=x86_64-efi --efi-directory="$ESP" --bootloader-id=Graphite --modules="tpm" --disable-shim-lock
+  grub-install --target=x86_64-efi --efi-directory="$ESP" --removable --modules="tpm" --disable-shim-lock
+  local f; while IFS= read -r f; do sbctl sign -s "$f"; done < <(targets)
+  sbctl verify
+  echo "Done. Reboot, enable Secure Boot in firmware, then: graphite secureboot status"
+}
+
+cmd=${1:-status}; shift || true
+case $cmd in
+  status) status ;;
+  plan) plan 1 ;;
+  setup) setup "$@" ;;
+  sign) need_root sign; sbctl sign-all; sbctl verify ;;
+  verify) need_root verify; sbctl verify ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

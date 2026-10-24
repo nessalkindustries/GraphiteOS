@@ -7,7 +7,7 @@ export HYPRLAND_INSTANCE_SIGNATURE
 WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -E '^wayland-[0-9]+$' | head -1); export WAYLAND_DISPLAY
 wblog=$XDG_RUNTIME_DIR/graphite-waybar.log
 # Hyprland 0.56 `hyprctl layers`: "... xywh: X Y W H, a: 1, namespace: waybar, pid: N"
-barup() { for _ in $(seq "${1:-30}"); do hyprctl layers 2>/dev/null | grep -q 'namespace: waybar' && return 0; sleep 2; done; return 1; }
+barup() { for _ in $(seq "${1:-30}"); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: waybar' && return 0; sleep 2; done; return 1; }
 fails=0
 pkill -x hypridle 2>/dev/null   # no idle lock during the test (hyprlock crashes under TCG, see roadmap notes)
 wbtree() { for p in $(pgrep -x waybar); do echo -n "[$p ppid=$(ps -o ppid= -p $p|tr -d ' ') parent=$(ps -o comm= -p $(ps -o ppid= -p $p) 2>/dev/null) cg=$(cut -d: -f3 /proc/$p/cgroup|sed 's|.*/||') start=$(ps -o lstart= -p $p|awk '{print $4}')] "; done; }
@@ -35,16 +35,18 @@ gl=$(grep -aiohE "GL_RENDERER[^\"]{0,80}|renderer: [^\"]{0,80}" "$hl" 2>/dev/nul
 echo "SMOKE: diag gl=$gl"
 check "GL renderer reported by Hyprland" '[ -n "$gl" ]'
 # theme switch must leave a drawn bar (regression: waybar missing after a switch)
-graphite-theme set graphite-nord >/dev/null 2>&1; barup 30; sleep 5
+timeout 180 graphite-theme set graphite-nord >/dev/null 2>&1 || echo "SMOKE: diag theme nord rc=$?"; barup 30; sleep 5
 echo "SMOKE: SHOT theme-nord"; sleep 10
 check "waybar back after theme switch (layer mapped)" 'barup 5'
 echo "SMOKE: diag waybar after nord: $(wbtree)"
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 nord=$(sed -n 's/^accent *= *"\(#[0-9a-fA-F]*\)".*/\1/p' /usr/share/graphite/themes/graphite-nord/colors.toml)
 check "kitty colours follow theme (nord accent $nord)" 'grep -qi "$nord" ~/.config/graphite/current/kitty.conf'
-graphite-theme set graphite-teal >/dev/null 2>&1
-barup 30
-echo "SMOKE: diag waybar after teal: $(wbtree) units=$(systemctl --user list-units --all 'waybar*' --no-legend 2>/dev/null|tr -s ' '|cut -c1-80)"
+echo "SMOKE: diag t=$(date +%T) teal switch start"
+timeout 180 graphite-theme set graphite-teal >/dev/null 2>&1 || echo "SMOKE: diag theme teal rc=$?"
+echo "SMOKE: diag t=$(date +%T) teal switch returned"
+barup 30; echo "SMOKE: diag t=$(date +%T) barup done"
+echo "SMOKE: diag waybar after teal: $(wbtree) units=$(timeout 10 systemctl --user list-units --all 'waybar*' --no-legend 2>/dev/null|tr -s ' '|cut -c1-80)"
 check "waybar back after switching to graphite-teal" 'barup 5 && [ "$(pgrep -cx waybar)" = 1 ]'
 pgrep -x waybar >/dev/null || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 # Quickshell bar prototype (diagnostic only; Waybar is the default)
@@ -56,6 +58,10 @@ if command -v qs >/dev/null; then
   echo "SMOKE: diag quickshell prototype running=$(pgrep -x qs >/dev/null && echo yes || echo no) layer=$(hyprctl layers | grep -c 'namespace: quickshell')"
   echo "SMOKE: SHOT quickshell-bar"; sleep 15
   check "quickshell prototype bar mapped" "hyprctl layers | grep -q 'namespace: quickshell'"
-  pkill -x qs 2>/dev/null; hyprctl dispatch exec "exec waybar >>$wblog 2>&1" >/dev/null; barup 30
+  # restore the default bar (cleanup, not a check). Wait until qs has really exited and its layer is
+  # gone before relaunching, and bound the wait so it can never outlive the harness smoke deadline.
+  pkill -x qs 2>/dev/null; for _ in $(seq 20); do pgrep -x qs >/dev/null || break; sleep 0.5; done; pkill -9 -x qs 2>/dev/null
+  pgrep -x waybar >/dev/null || timeout 10 hyprctl dispatch exec "exec waybar >>$wblog 2>&1" >/dev/null 2>&1
+  barup 10 || echo "SMOKE: diag waybar not back after quickshell (cleanup only): $(tail -3 $wblog 2>/dev/null | tr '\n' '|')"
 fi
 echo "SMOKE: DONE fails=$fails"

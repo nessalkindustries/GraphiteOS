@@ -15,6 +15,9 @@ if [ "$(systemctl is-active pacman-init.service)" != active ]; then
   pacman-key --init && pacman-key --populate
 fi
 curl -fsSL "$HOST/selftest.sh" -o /tmp/selftest.sh
+if curl -fsSL "$HOST/graphite-iso-install" -o /tmp/gii 2>/dev/null; then
+  install -m755 /tmp/gii /usr/local/bin/graphite-iso-install; echo "harness: using overlay graphite-iso-install"
+fi
 export GRAPHITE_CACHE_SERVER="$HOST/pkg"
 graphite-iso-install --disk /dev/vda --user tester --password 'graphite-test' \
   --luks-pass 'graphite-luks' --hostname graphite-test --timezone America/Toronto \
