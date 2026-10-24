@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Start waybar at login and make sure its layer actually maps. Under heavy load
+# (e.g. software rendering in VMs) waybar can start before the compositor is
+# ready and never map its layer-shell surface. Retry a bounded number of times.
+# Env: GRAPHITE_BAR_TRIES (default 5), GRAPHITE_BAR_WAIT seconds per try (default 20).
+tries=${GRAPHITE_BAR_TRIES:-5}
+wait=${GRAPHITE_BAR_WAIT:-20}
+log=${XDG_RUNTIME_DIR:-/tmp}/graphite-waybar.log
+mapped() { timeout 5 hyprctl layers 2>/dev/null | grep -q 'namespace: waybar'; }
+: >"$log"
+for ((i = 1; i <= tries; i++)); do
+  if ! pgrep -x waybar >/dev/null; then
+    echo "graphite-bar: starting waybar (try $i/$tries)" >>"$log"
+    setsid -f waybar >>"$log" 2>&1
+  fi
+  for ((s = 0; s < wait * 2; s++)); do
+    mapped && { echo "graphite-bar: waybar mapped (try $i)" >>"$log"; exit 0; }
+    sleep 0.5
+  done
+  echo "graphite-bar: waybar not mapped after ${wait}s, restarting" >>"$log"
+  pkill -x waybar 2>/dev/null
+  for _ in $(seq 25); do pgrep -x waybar >/dev/null || break; sleep 0.2; done
+  pkill -9 -x waybar 2>/dev/null
+done
+echo "graphite-bar: giving up after $tries tries" >>"$log"
+pgrep -x waybar >/dev/null || setsid -f waybar >>"$log" 2>&1
+exit 1
