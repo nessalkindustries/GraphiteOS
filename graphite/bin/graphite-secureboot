@@ -78,8 +78,8 @@ setup() {
   grub-install --target=x86_64-efi --efi-directory="$ESP" --bootloader-id=Graphite --modules="${mods% }" --disable-shim-lock
   grub-install --target=x86_64-efi --efi-directory="$ESP" --removable --modules="${mods% }" --disable-shim-lock
   local f; while IFS= read -r f; do sbctl sign -s "$f"; done < <(targets)
-  sbctl verify
-  while IFS= read -r f; do sbctl verify 2>&1 | grep -qF "$f is signed" || { echo "error: $f is not signed, not enrolling keys" >&2; exit 1; }; done < <(targets)
+  local v; v=$(sbctl verify 2>&1 || true); echo "$v"
+  while IFS= read -r f; do grep -qF "$f is signed" <<<"$v" || { echo "error: $f is not signed, not enrolling keys" >&2; exit 1; }; done < <(targets)
   if ((ms)); then sbctl enroll-keys --microsoft; else sbctl enroll-keys --yes-this-might-brick-my-machine; fi
   echo "Done. Reboot, enable Secure Boot in firmware, then: graphite secureboot status"
 }
