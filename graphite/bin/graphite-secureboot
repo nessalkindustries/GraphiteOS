@@ -23,7 +23,7 @@ GRUB_MODULES="tpm all_video boot btrfs cat chain configfile echo efifwsetup efin
  gfxmenu gfxterm gfxterm_background gzio halt help iso9660 jpeg keystatus loadenv loopback linux ls lsefi
  memdisk minicmd normal part_gpt part_msdos password_pbkdf2 png probe reboot regexp search search_fs_uuid
  search_fs_file search_label serial terminal sleep smbios squash4 test true video cryptodisk luks luks2
- gcry_rijndael gcry_sha256 gcry_sha512 pbkdf2"
+ gcry_rijndael gcry_sha256 gcry_sha512 pbkdf2 bli efi_gop video_bochs video_cirrus"
 kernels() { ls "$ESP"/vmlinuz-* 2>/dev/null; }
 targets() { kernels; [[ -f $GRUB_EFI ]] && echo "$GRUB_EFI"; [[ -f $FALLBACK_EFI ]] && echo "$FALLBACK_EFI"; return 0; }
 
@@ -49,12 +49,12 @@ graphite secureboot setup would:
   1. pacman -S --needed sbctl
   2. check the firmware is in Setup Mode (abort otherwise)
   3. sbctl create-keys
-  4. sbctl enroll-keys $([[ $ms == 1 ]] && echo "--microsoft  (keeps Microsoft keys: GPU option ROMs, dual boot)" || echo "(own keys only; risky on hardware with option ROMs)")
-  5. grub-install --target=x86_64-efi --efi-directory=$ESP --bootloader-id=Graphite \\
+  4. grub-install --target=x86_64-efi --efi-directory=$ESP --bootloader-id=Graphite \\
        --modules="<tpm + every module grub.cfg needs, see GRUB_MODULES>" --disable-shim-lock   (+ --removable copy)
-  6. sbctl sign -s for: $(targets | tr '\n' ' ')
+  5. sbctl sign -s for: $(targets | tr '\n' ' ')
      (-s saves them; sbctl's pacman hook re-signs on every kernel/GRUB update)
-  7. sbctl verify
+  6. sbctl verify (abort before enrolling if anything is unsigned)
+  7. sbctl enroll-keys $([[ $ms == 1 ]] && echo "--microsoft  (keeps Microsoft keys: GPU option ROMs, dual boot)" || echo "(own keys only; risky on hardware with option ROMs)")
 Then reboot, enable Secure Boot in the firmware, and run: graphite secureboot status
 P
 }
@@ -71,12 +71,16 @@ setup() {
   pacman -S --needed --noconfirm sbctl
   [[ $(efivar SetupMode) == 1 ]] || { echo "error: firmware is not in Setup Mode. Reboot into firmware setup, clear/reset Secure Boot keys, then rerun." >&2; exit 1; }
   [[ -d /var/lib/sbctl/keys || -d /usr/share/secureboot/keys ]] || sbctl create-keys
-  if ((ms)); then sbctl enroll-keys --microsoft; else sbctl enroll-keys --yes-this-might-brick-my-machine; fi
-  local mods; mods=$(echo $GRUB_MODULES)
-  grub-install --target=x86_64-efi --efi-directory="$ESP" --bootloader-id=Graphite --modules="$mods" --disable-shim-lock
-  grub-install --target=x86_64-efi --efi-directory="$ESP" --removable --modules="$mods" --disable-shim-lock
+  # Sign the whole boot chain first and enroll the keys last: if anything fails before enrolling,
+  # the firmware still boots the old (unsigned) chain instead of refusing it.
+  local m mods=""
+  for m in $GRUB_MODULES; do [[ -f /usr/lib/grub/x86_64-efi/$m.mod ]] && mods+="$m "; done
+  grub-install --target=x86_64-efi --efi-directory="$ESP" --bootloader-id=Graphite --modules="${mods% }" --disable-shim-lock
+  grub-install --target=x86_64-efi --efi-directory="$ESP" --removable --modules="${mods% }" --disable-shim-lock
   local f; while IFS= read -r f; do sbctl sign -s "$f"; done < <(targets)
   sbctl verify
+  while IFS= read -r f; do sbctl verify 2>&1 | grep -qF "$f is signed" || { echo "error: $f is not signed, not enrolling keys" >&2; exit 1; }; done < <(targets)
+  if ((ms)); then sbctl enroll-keys --microsoft; else sbctl enroll-keys --yes-this-might-brick-my-machine; fi
   echo "Done. Reboot, enable Secure Boot in firmware, then: graphite secureboot status"
 }
 

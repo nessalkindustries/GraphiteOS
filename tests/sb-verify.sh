@@ -6,7 +6,9 @@ graphite secureboot status | sed 's/^/SB: status /'
 check "firmware reports Secure Boot enabled" 'graphite secureboot status | grep -q "secure boot:  enabled"'
 check "firmware left Setup Mode (keys enrolled)" 'graphite secureboot status | grep -q "setup mode:   no"'
 check "kernel saw Secure Boot" 'journalctl -k -b | grep -qi "secure boot enabled"'
-check "sbctl: all tracked EFI binaries signed" '! sbctl verify 2>&1 | grep -qi "not signed"'
+for f in /boot/vmlinuz-linux /boot/vmlinuz-linux-lts /boot/EFI/Graphite/grubx64.efi /boot/EFI/BOOT/BOOTX64.EFI; do
+  check "signed: $f" "sbctl verify 2>&1 | grep -q '$f is signed'"
+done
 check "booted through LUKS + btrfs root" 'findmnt -no FSTYPE / | grep -q btrfs && lsblk -no TYPE | grep -q crypt'
 journalctl -k -b | grep -i "secure boot" | head -3 | sed 's/^/SB: kmsg /'
 echo "SB: VERIFY DONE fails=$fails"
