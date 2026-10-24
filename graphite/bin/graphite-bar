@@ -18,7 +18,9 @@ stop() {
   for _ in $(seq 25); do pgrep -x waybar >/dev/null || break; sleep 0.2; done
   pkill -9 -x waybar 2>/dev/null
 }
-start() { : >"$rt/waybar.cur"; setsid -f sh -c 'exec waybar >>"$1" 2>&1' sh "$rt/waybar.cur"; }
+# 8>&-: waybar must not inherit the lock fd, or it holds the lock for its lifetime and every
+# --restart (theme switch) blocks for the whole flock timeout
+start() { : >"$rt/waybar.cur"; setsid -f sh -c 'exec waybar >>"$1" 2>&1' sh "$rt/waybar.cur" 8>&-; }
 [[ ${1:-} == --restart ]] && { say "restart requested"; stop; }
 for ((i = 1; i <= tries; i++)); do
   if ! pgrep -x waybar >/dev/null; then say "starting waybar (try $i/$tries)"; start; fi
