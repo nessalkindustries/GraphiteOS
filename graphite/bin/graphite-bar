@@ -12,6 +12,12 @@ rt=${XDG_RUNTIME_DIR:-/tmp}
 log=$rt/graphite-waybar.log
 exec 8>"$rt/graphite-bar.lock"; flock -w 120 8 || true
 mapped() { timeout 5 hyprctl layers 2>/dev/null | grep -q 'namespace: waybar'; }
+# A layer can show up in `hyprctl layers` just before waybar gives up on its initial configure; that
+# surface is then dropped and never maps. Only count it as up once it stayed mapped for $settle s
+# without a configure timeout.
+settle=${GRAPHITE_BAR_SETTLE:-15}
+missed() { grep -q 'initial .configure' "$rt/waybar.cur" 2>/dev/null; }
+stable() { for ((k = 0; k < settle; k++)); do missed && return 1; mapped || return 1; sleep 1; done; ! missed; }
 say() { echo "graphite-bar $(date +%T): $*" >>"$log"; logger -t graphite-bar -- "$*" 2>/dev/null; }
 stop() {
   pkill -x waybar 2>/dev/null
@@ -25,8 +31,8 @@ start() { : >"$rt/waybar.cur"; setsid -f sh -c 'exec waybar >>"$1" 2>&1' sh "$rt
 for ((i = 1; i <= tries; i++)); do
   if ! pgrep -x waybar >/dev/null; then say "starting waybar (try $i/$tries)"; start; fi
   for ((s = 0; s < wait * 2; s++)); do
-    mapped && { say "waybar mapped (try $i)"; cat "$rt/waybar.cur" >>"$log" 2>/dev/null; exit 0; }
-    if grep -q 'initial .configure' "$rt/waybar.cur" 2>/dev/null; then say "missed initial configure"; break; fi
+    mapped && stable && { say "waybar mapped and stable for ${settle}s (try $i)"; cat "$rt/waybar.cur" >>"$log" 2>/dev/null; exit 0; }
+    if missed; then say "missed initial configure"; break; fi
     # waybar exited (e.g. early in the first login): restart now instead of idling out this try
     if ((s > 2)) && ! pgrep -x waybar >/dev/null; then say "waybar exited: $(tail -2 "$rt/waybar.cur" 2>/dev/null | tr '\n' ' ')"; break; fi
     sleep 0.5
