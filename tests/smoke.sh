@@ -42,9 +42,11 @@ echo "SMOKE: diag waybar after nord: $(wbtree)"
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 nord=$(sed -n 's/^accent *= *"\(#[0-9a-fA-F]*\)".*/\1/p' /usr/share/graphite/themes/graphite-nord/colors.toml)
 check "kitty colours follow theme (nord accent $nord)" 'grep -qi "$nord" ~/.config/graphite/current/kitty.conf'
+echo "SMOKE: diag t=$(date +%T) teal switch start"
 timeout 180 graphite-theme set graphite-teal >/dev/null 2>&1 || echo "SMOKE: diag theme teal rc=$?"
-barup 30
-echo "SMOKE: diag waybar after teal: $(wbtree) units=$(systemctl --user list-units --all 'waybar*' --no-legend 2>/dev/null|tr -s ' '|cut -c1-80)"
+echo "SMOKE: diag t=$(date +%T) teal switch returned"
+barup 30; echo "SMOKE: diag t=$(date +%T) barup done"
+echo "SMOKE: diag waybar after teal: $(wbtree) units=$(timeout 10 systemctl --user list-units --all 'waybar*' --no-legend 2>/dev/null|tr -s ' '|cut -c1-80)"
 check "waybar back after switching to graphite-teal" 'barup 5 && [ "$(pgrep -cx waybar)" = 1 ]'
 pgrep -x waybar >/dev/null || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 # Quickshell bar prototype (diagnostic only; Waybar is the default)
