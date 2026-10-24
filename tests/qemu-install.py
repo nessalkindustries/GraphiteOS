@@ -63,6 +63,8 @@ if ("--keep-disk" not in sys.argv and "--smoke-only" not in sys.argv) or not os.
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", DISK, "40G"], check=True)
     shutil.copy(OVMF_VARS_SRC, VARS)
 
+# Deadlines use the monotonic clock: the box can be frozen for many minutes (session cut-offs) while
+# the wall clock keeps running, which fired harness timeouts early (run 4: smoke killed 23 s after SHOT).
 def qemu(extra, logname, timeout, on_line=None, done=None):
     cmd = ["qemu-system-x86_64", "-machine", "q35", "-accel", "tcg,thread=multi", "-cpu", "max", "-m", "6144", "-smp", "4",
            "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
@@ -72,10 +74,10 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
            "-serial", "stdio", "-no-reboot", "-rtc", "base=utc"] + extra
     log = open(os.path.join(OUT, logname), "wb")
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    buf = b""; start = time.time(); state = {}
+    buf = b""; start = time.monotonic(); state = {}
     os.set_blocking(p.stdout.fileno(), False)
     while p.poll() is None:
-        if time.time() - start > timeout:
+        if time.monotonic() - start > timeout:
             note(f"{logname}: TIMEOUT after {timeout}s"); p.kill(); break
         try: chunk = p.stdout.read(4096)
         except BlockingIOError: chunk = None
@@ -100,13 +102,13 @@ def send(p, s):
 SMOKE_ONLY = "--smoke-only" in sys.argv   # reuse disk + boot logs of the previous run, only redo the smoke boot
 if SMOKE_ONLY and not os.path.exists(DISK): sys.exit("--smoke-only needs an existing disk")
 # --- 1. install from the live ISO ------------------------------------------
-t0 = time.time()
+t0 = time.monotonic()
 append = (f"archisobasedir=graphite archisolabel={label} console=tty0 console=ttyS0,115200 "
           f"graphite.autorun={host}/{LIVE_SCRIPT} graphite.tz=America/Toronto systemd.mask=sddm.service")
 inst = "GRAPHITE-INSTALL: OK" if SMOKE_ONLY else qemu(["-kernel", f"{kd}/vmlinuz-linux", "-initrd", f"{kd}/initramfs-linux.img", "-append", append,
              "-cdrom", ISO], "install.log", 4 * 3600)
 ok = "GRAPHITE-INSTALL: OK" in inst
-note(f"INSTALL {'OK' if ok else 'FAILED'} in {int(time.time()-t0)}s")
+note(f"INSTALL {'OK' if ok else 'FAILED'} in {int(time.monotonic()-t0)}s")
 if not ok:
     sys.exit(1)
 
@@ -119,19 +121,19 @@ def make_handler(boot):
             # open submenu, skip header -> newest snapshot, open, skip header -> first kernel, boot.
             # Each key is sent only after GRUB redrew the highlight for the previous one; resent after 20 s.
             keys = ["\r", "\x1b[B", "\r", "\x1b[B", "\r"]
-            n = st.get("hl", 0); now = time.time()
+            n = st.get("hl", 0); now = time.monotonic()
             if st["mark"] < 0 or n > st["mark"] or (now - st["kt"] > 20 and "keys to select" in text[-4000:] and "passphrase" not in text[-4000:]):
                 if st["mark"] >= 0 and n > st["mark"]: st["seq"] += 1
                 if st["seq"] < 5:
                     time.sleep(1.5); n = st.get("hl", 0)
-                    send(p, keys[st["seq"]]); st["mark"] = n; st["kt"] = time.time()
+                    send(p, keys[st["seq"]]); st["mark"] = n; st["kt"] = time.monotonic()
                 else:
                     st["seq"] = 6; note("boot 2: snapshot entry booted (sequenced keys)")
             return
         if boot == 2 and "grub" not in st and ("Use the" in text and "keys to select" in text):
             # step Down until the highlighted row (drawn as "*<title>") is the grub-btrfs submenu;
             # its position depends on the distro name and firmware entries, so don't count
-            now = time.time()
+            now = time.monotonic()
             if now - st.get("nav_t", 0) < 1.5:
                 return
             hl = re.findall(r"H\*([^\r\n\x1b]*)", text)
@@ -142,9 +144,9 @@ def make_handler(boot):
                 st["nav"] = st.get("nav", 0) + 1; st["nav_t"] = now; send(p, "\x1b[B")
     return h
 for boot in ([] if SMOKE_ONLY else range(1, 7)):
-    t = time.time()
+    t = time.monotonic()
     out = qemu([], f"boot-{boot}.log", 3 * 3600, on_line=make_handler(boot))
-    note(f"boot {boot} ended after {int(time.time()-t)}s")
+    note(f"boot {boot} ended after {int(time.monotonic()-t)}s")
     if "SELFTEST: ALL DONE" in out:
         break
 # --- 3. screenshot boot: SDDM (harness autologin) -> Hyprland desktop -------
@@ -152,11 +154,11 @@ if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.gl
     sock = os.path.join(OUT, "mon.sock"); ppm = os.path.join(OUT, "installed.ppm")
     def shot(text, p, st):
         if "login:" in text and "t" not in st:
-            st["t"] = time.time()
+            st["t"] = time.monotonic()
         # smoke tests: log in on the serial getty (desktop autologin runs on tty1) and run smoke.sh
-        if "t" in st and "smoke" not in st and time.time() - st["t"] > 150:
+        if "t" in st and "smoke" not in st and time.monotonic() - st["t"] > 150:
             st["smoke"] = 1; send(p, "tester\r"); time.sleep(4); send(p, "graphite-test\r"); time.sleep(6)
-            send(p, f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.time()
+            send(p, f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.monotonic()
         for m in re.findall(r"@SMOKE: ([^\r\n]*)[\r\n]", text):
             if ("sm", m) not in st: st[("sm", m)] = 1; note("SMOKE: " + m)
             if m.startswith("SHOT ") and ("shotx", m) not in st:
@@ -166,7 +168,7 @@ if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.gl
                     from PIL import Image
                     Image.open(x).save(x[:-4] + ".png"); os.remove(x); note(f"screenshot: out/harness/smoke-{name}.png")
                 except Exception as e: note(f"smoke shot {name} failed: {e}")
-        if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.time() - st["st"] > 1800):   # TCG: full smoke takes ~10-13 min
+        if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.monotonic() - st["st"] > 1800):   # TCG: full smoke takes ~10-13 min
             st["shot"] = 1; time.sleep(20)   # let the kitty opened by smoke.sh draw
             s2 = socket.socket(socket.AF_UNIX); s2.connect(sock)
             s2.send(f"screendump {ppm}\n".encode()); time.sleep(3)
