@@ -6,7 +6,7 @@
 2. Boots the installed disk repeatedly (-no-reboot: each guest reboot ends one
    QEMU run). Types the LUKS passphrase on the serial console, navigates GRUB to
    the Snapper snapshot submenu on the 2nd boot, and collects SELFTEST lines.
-Usage: tests/qemu-install.py [ISO] [--profile desktop|full] [--keep-disk]
+Usage: tests/qemu-install.py [ISO] [--profile desktop|full] [--keep-disk] [--smoke-only]
 Results: out/harness/{install,boot-N}.log, out/harness/result.txt
 Needs: qemu-system-x86_64, OVMF (4M), 7z, python3; host package cache at
 /var/cache/graphite-pkg (filled by build.sh) is served to the guest as a
@@ -59,7 +59,7 @@ subprocess.run(["7z", "e", "-y", f"-o{kd}", ISO, "graphite/boot/x86_64/vmlinuz-l
 label = subprocess.run(["sh", "-c", f"dd if='{ISO}' bs=1 skip=32808 count=32 2>/dev/null"], capture_output=True).stdout.decode().strip()
 note(f"ISO {os.path.basename(ISO)} label={label} profile={PROFILE}")
 
-if "--keep-disk" not in sys.argv or not os.path.exists(DISK):
+if ("--keep-disk" not in sys.argv and "--smoke-only" not in sys.argv) or not os.path.exists(DISK):
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", DISK, "40G"], check=True)
     shutil.copy(OVMF_VARS_SRC, VARS)
 
@@ -97,11 +97,13 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
 def send(p, s):
     p.stdin.write(s.encode()); p.stdin.flush()
 
+SMOKE_ONLY = "--smoke-only" in sys.argv   # reuse disk + boot logs of the previous run, only redo the smoke boot
+if SMOKE_ONLY and not os.path.exists(DISK): sys.exit("--smoke-only needs an existing disk")
 # --- 1. install from the live ISO ------------------------------------------
 t0 = time.time()
 append = (f"archisobasedir=graphite archisolabel={label} console=tty0 console=ttyS0,115200 "
           f"graphite.autorun={host}/{LIVE_SCRIPT} graphite.tz=America/Toronto systemd.mask=sddm.service")
-inst = qemu(["-kernel", f"{kd}/vmlinuz-linux", "-initrd", f"{kd}/initramfs-linux.img", "-append", append,
+inst = "GRAPHITE-INSTALL: OK" if SMOKE_ONLY else qemu(["-kernel", f"{kd}/vmlinuz-linux", "-initrd", f"{kd}/initramfs-linux.img", "-append", append,
              "-cdrom", ISO], "install.log", 4 * 3600)
 ok = "GRAPHITE-INSTALL: OK" in inst
 note(f"INSTALL {'OK' if ok else 'FAILED'} in {int(time.time()-t0)}s")
@@ -139,7 +141,7 @@ def make_handler(boot):
             elif st.get("nav", 0) < 40:
                 st["nav"] = st.get("nav", 0) + 1; st["nav_t"] = now; send(p, "\x1b[B")
     return h
-for boot in range(1, 7):
+for boot in ([] if SMOKE_ONLY else range(1, 7)):
     t = time.time()
     out = qemu([], f"boot-{boot}.log", 3 * 3600, on_line=make_handler(boot))
     note(f"boot {boot} ended after {int(time.time()-t)}s")
@@ -171,7 +173,8 @@ if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.gl
             s2.send(b"quit\n"); time.sleep(1); s2.close()
     def h5(text, p, st):
         make_handler(5)(text, p, st); shot(text, p, st)
-    qemu(["-monitor", f"unix:{sock},server,nowait"], "boot-shot.log", 1500, on_line=h5)
+    qemu(["-monitor", f"unix:{sock},server,nowait"], "boot-shot.log", 3600,   # was 1500: boot+login under TCG took ~16 min, killing the smoke mid-run
+           on_line=h5)
     if os.path.exists(ppm):
         try:
             from PIL import Image
