@@ -12,7 +12,7 @@ rt=${XDG_RUNTIME_DIR:-/tmp}
 log=$rt/graphite-waybar.log
 exec 8>"$rt/graphite-bar.lock"; flock -w 120 8 || true
 mapped() { timeout 5 hyprctl layers 2>/dev/null | grep -q 'namespace: waybar'; }
-say() { echo "graphite-bar $(date +%T): $*" >>"$log"; }
+say() { echo "graphite-bar $(date +%T): $*" >>"$log"; logger -t graphite-bar -- "$*" 2>/dev/null; }
 stop() {
   pkill -x waybar 2>/dev/null
   for _ in $(seq 25); do pgrep -x waybar >/dev/null || break; sleep 0.2; done
@@ -25,6 +25,8 @@ for ((i = 1; i <= tries; i++)); do
   for ((s = 0; s < wait * 2; s++)); do
     mapped && { say "waybar mapped (try $i)"; cat "$rt/waybar.cur" >>"$log" 2>/dev/null; exit 0; }
     if grep -q 'initial .configure' "$rt/waybar.cur" 2>/dev/null; then say "missed initial configure"; break; fi
+    # waybar exited (e.g. early in the first login): restart now instead of idling out this try
+    if ((s > 2)) && ! pgrep -x waybar >/dev/null; then say "waybar exited: $(tail -2 "$rt/waybar.cur" 2>/dev/null | tr '\n' ' ')"; break; fi
     sleep 0.5
   done
   cat "$rt/waybar.cur" >>"$log" 2>/dev/null
