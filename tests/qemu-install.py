@@ -9,7 +9,8 @@
 Usage: tests/qemu-install.py [ISO] [--profile desktop|full] [--keep-disk] [--smoke-only] [--secureboot] [--no-smoke]
 --secureboot: Secure Boot capable OVMF (SMM, empty key store = Setup Mode). After the normal run, one boot
   enrolls keys with `graphite secureboot setup` (tests/sb-enroll.sh), then a boot with Secure Boot enforced
-  must reach the system and pass tests/sb-verify.sh.
+  must reach the system and pass tests/sb-verify.sh. Adds a swtpm TPM 2.0 (needs swtpm): GRUB's lockdown
+  only loads kernels via the tpm verifier.
 --sb-only: with --secureboot, reuse an installed disk (+ its boot logs) and only run the two Secure Boot
   boots, with a fresh Setup Mode key store; --overlay-secureboot uses this checkout's graphite-secureboot.
 --no-smoke: skip the desktop smoke boot. GRAPHITE_HARNESS_OUT overrides the output directory.
@@ -85,6 +86,17 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
            "-drive", f"file={DISK},if=virtio,format=qcow2,cache=unsafe",
            "-nic", "user,model=virtio-net-pci", "-display", "none", "-vga", "none", "-device", "virtio-vga",
            "-serial", "stdio", "-no-reboot", "-rtc", "base=utc"] + extra
+    if SECUREBOOT:
+        # GRUB in Secure Boot lockdown (no shim) only loads kernels when a verifier claims them; that is
+        # the tpm module, which needs a TPM. Real Secure Boot machines have one; QEMU gets swtpm (TPM 2.0).
+        tdir = os.path.join(OUT, "tpm"); os.makedirs(tdir, exist_ok=True); tsock = os.path.join(OUT, "tpm.sock")
+        if os.path.exists(tsock): os.remove(tsock)
+        subprocess.Popen(["swtpm", "socket", "--tpm2", "--tpmstate", f"dir={tdir}", "--ctrl", f"type=unixio,path={tsock}", "--terminate"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            if os.path.exists(tsock): break
+            time.sleep(0.1)
+        cmd += ["-chardev", f"socket,id=chrtpm,path={tsock}", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"]
     log = open(os.path.join(OUT, logname), "wb")
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     buf = b""; start = time.monotonic(); state = {}
