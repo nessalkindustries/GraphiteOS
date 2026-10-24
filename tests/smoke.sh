@@ -15,6 +15,7 @@ check() { if eval "$2" >/dev/null 2>&1; then echo "SMOKE: ok   $1"; else echo "S
 check "Hyprland running" 'pgrep -x Hyprland'
 check "hyprctl answers" 'hyprctl version'
 check "bar (waybar) loaded and mapped" 'pgrep -x waybar && barup 60'
+barup 1 || echo "SMOKE: diag login bar: $(wbtree) gb=$(pgrep -af graphite-bar | tr '\n' ' ') log: $(grep -a 'graphite-bar\|configure' $wblog 2>/dev/null | tail -12 | tr '\n' '|') cur: $(tail -5 $XDG_RUNTIME_DIR/waybar.cur 2>/dev/null | tr '\n' '|') load: $(cut -d' ' -f1-3 /proc/loadavg) up: $(cut -d' ' -f1 /proc/uptime)"
 before=$(hyprctl clients 2>/dev/null | grep -c "class: kitty")
 hyprctl dispatch exec kitty >/dev/null 2>&1
 for _ in $(seq 60); do [ "$(hyprctl clients 2>/dev/null | grep -c 'class: kitty')" -gt "$before" ] && break; sleep 2; done

@@ -143,19 +143,30 @@ def make_handler(boot):
     def h(text, p, st):
         if re.search(r"Enter passphrase for|A password is required to access", text[-600:]) and not st.get(("pw", text.count("passphrase"))):
             st[("pw", text.count("passphrase"))] = 1; time.sleep(1); send(p, LUKS + "\r")
-        if boot == 2 and st.get("seq", 99) < 5:
-            # open submenu, skip header -> newest snapshot, open, skip header -> first kernel, boot.
-            # Each key is sent only after GRUB redrew the highlight for the previous one; resent after 20 s.
-            keys = ["\r", "\x1b[B", "\r", "\x1b[B", "\r"]
-            n = st.get("hl", 0); now = time.monotonic()
-            if st["mark"] < 0 or n > st["mark"] or (now - st["kt"] > 20 and "keys to select" in text[-4000:] and "passphrase" not in text[-4000:]):
-                if st["mark"] >= 0 and n > st["mark"]: st["seq"] += 1
-                if st["seq"] < 5:
-                    time.sleep(1.5); n = st.get("hl", 0)
-                    send(p, keys[st["seq"]]); st["mark"] = n; st["kt"] = time.monotonic()
-                else:
-                    st["seq"] = 6; note("boot 2: snapshot entry booted (sequenced keys)")
+        if boot == 2 and st.get("ph") in ("list", "kern"):
+            # Navigate by the highlighted row's text, not by counting keys: a GRUB redraw (e.g. the
+            # text->gfx console switch seen with the Secure Boot OVMF) can look like a highlight move,
+            # and Enter on a submenu's title row just returns to the previous menu.
+            # list: Down to the newest snapshot row, Enter. kern: Down to the vmlinuz-linux entry, Enter.
+            now = time.monotonic()
+            if now - st.get("kt", 0) < 2.0: return
+            hl = re.findall(r"H\*([^\r\n\x1b]*)", text[-6000:])
+            if not hl: return
+            cur = hl[-1]; n = st.get("hl", 0)
+            if n == st.get("mark") and now - st["kt"] < 20: return   # wait for GRUB to redraw after the last key
+            if "Date" in cur and "Snapshot" in cur: st["ph"] = "list"   # back on the snapshot list (header)
+            if st["ph"] == "list":
+                if "@snapshots/" in cur and "Date" not in cur:
+                    send(p, "\r"); st["ph"] = "kern"
+                else: send(p, "\x1b[B")
+            else:
+                if "vmlinuz-linux &" in cur:
+                    send(p, "\r"); st["ph"] = "done"; note("boot 2: snapshot entry booted (text-driven keys)")
+                elif st.get("kd", 0) < 6: send(p, "\x1b[B"); st["kd"] = st.get("kd", 0) + 1
+                else: send(p, "\x1b"); st["ph"] = "list"; st["kd"] = 0   # lost: back to the list
+            st["mark"] = n; st["kt"] = now
             return
+        if boot == 2 and st.get("ph") == "done": pass
         if boot == 2 and "grub" not in st and ("Use the" in text and "keys to select" in text):
             # step Down until the highlighted row (drawn as "*<title>") is the grub-btrfs submenu;
             # its position depends on the distro name and firmware entries, so don't count
@@ -164,7 +175,7 @@ def make_handler(boot):
                 return
             hl = re.findall(r"H\*([^\r\n\x1b]*)", text)
             if hl and "snapshots" in hl[-1]:
-                st["grub"] = 1; st["seq"] = 0; st["mark"] = -1
+                st["grub"] = 1; send(p, "\r"); st["ph"] = "list"; st["kt"] = now; st["mark"] = st.get("hl", 0)
                 note(f"boot 2: GRUB 'snapshots' highlighted after {st.get('nav', 0)} Downs")
             elif st.get("nav", 0) < 40:
                 st["nav"] = st.get("nav", 0) + 1; st["nav_t"] = now; send(p, "\x1b[B")
