@@ -1,0 +1,15 @@
+#!/bin/bash
+# Graphite launcher (Super+Space, Super+D): toggles the Quickshell launcher (apps, calculator,
+# commands; ~/.config/quickshell/graphite-bar/Launcher.qml) through Quickshell IPC.
+# Falls back to rofi when the Quickshell bar is not running (e.g. `graphite bar waybar`).
+#   graphite-launcher            toggle
+#   graphite-launcher query TEXT print the top result for TEXT (scripts/tests)
+ipc() { timeout 5 qs ipc -c graphite-bar call launcher "$@" 2>/dev/null; }
+case ${1:-toggle} in
+  toggle|open|close)
+    if pgrep -x qs >/dev/null && ipc "${1:-toggle}"; then exit 0; fi
+    [[ ${1:-toggle} == close ]] && exit 0
+    exec rofi -show drun ;;
+  query) ipc query "${2:-}" ;;
+  *) echo "usage: graphite-launcher [toggle|open|close|query TEXT]" >&2; exit 1 ;;
+esac

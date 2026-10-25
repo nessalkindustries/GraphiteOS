@@ -62,6 +62,24 @@ barup 30; echo "SMOKE: diag t=$(date +%T) barup done"
 echo "SMOKE: diag waybar after teal: $(wbtree) units=$(timeout 10 systemctl --user list-units --all 'waybar*' --no-legend 2>/dev/null|tr -s ' '|cut -c1-80)"
 check "bar back after switching to graphite-teal" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ]'
 pgrep -x qs >/dev/null || echo "SMOKE: diag bar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
+# launcher (desk-2): search through IPC, then open it the way Super+Space does
+lq() { timeout 10 graphite-launcher query "$1" 2>/dev/null; }
+lmapped() { timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: graphite-launcher,'; }
+echo "SMOKE: diag launcher: calc=[$(lq '2+3*4')] app=[$(lq kitty)] cmd=[$(lq '>lock')] run=[$(lq '>echo hi')] theme=[$(lq 'theme: nord')]"
+check "Super+Space is bound to graphite-launcher" 'hyprctl binds | grep -i -A12 "key: space" | grep -q "arg: graphite-launcher"'
+check "launcher calculator: 2+3*4 = 14" '[ "$(lq "2+3*4")" = "calc: 14" ]'
+check "launcher calculator: = sqrt(16)+2^3 = 12" '[ "$(lq "= sqrt(16)+2^3")" = "calc: 12" ]'
+check "launcher finds apps (kitty)" '[ "$(lq kitty)" = "app: kitty" ]'
+check "launcher commands (>lock)" '[ "$(lq ">lock")" = "cmd: Lock screen" ]'
+check "launcher runs shell commands (>echo hi)" '[ "$(lq ">echo hi")" = "cmd: Run: echo hi" ]'
+check "launcher lists themes" '[ "$(lq "theme: nord")" = "cmd: Theme: graphite-nord" ]'
+timeout 10 hyprctl dispatch exec graphite-launcher >/dev/null 2>&1
+for _ in $(seq 15); do lmapped && break; sleep 2; done
+timeout 5 qs ipc -c graphite-bar call launcher query "" >/dev/null 2>&1   # show the app list in the shot
+echo "SMOKE: SHOT launcher"; sleep 8
+check "launcher opens (layer graphite-launcher mapped)" 'lmapped'
+timeout 10 graphite-launcher close >/dev/null 2>&1; sleep 3
+check "launcher closes" '! lmapped'
 # bar widgets: tray/network/audio/battery come from the services, check the backends answer
 check "upower daemon answers (battery widget backend)" 'timeout 10 upower -e'
 check "graphite bar status reports quickshell" 'graphite bar status | grep -q "bar: quickshell"'
@@ -72,6 +90,11 @@ BARNS=waybar; barup 30
 echo "SMOKE: SHOT waybar-optout"; sleep 5
 check "opt-out: graphite bar waybar maps waybar, no quickshell" 'barup 5 && [ "$(pgrep -cx waybar)" = 1 ] && ! pgrep -x qs'
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
+# without Quickshell the launcher falls back to rofi
+timeout 10 hyprctl dispatch exec graphite-launcher >/dev/null 2>&1
+for _ in $(seq 15); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: rofi,' && break; sleep 2; done
+check "launcher falls back to rofi with Waybar" 'timeout 10 hyprctl layers | grep -q "namespace: rofi,"'
+pkill -x rofi 2>/dev/null; sleep 2
 timeout 120 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
 BARNS=graphite-bar; barup 30
 check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'

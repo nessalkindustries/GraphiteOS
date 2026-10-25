@@ -7,10 +7,10 @@ or `~/.config/graphite/themes/<name>/`. `graphite-theme set <name>` (or Super+T)
 | Component | Source | Reload |
 |---|---|---|
 | Hyprland borders/gaps | `current/hyprland.conf` (sourced) | `hyprctl reload` |
-| Quickshell bar (default) | `~/.config/quickshell/graphite-bar/Colors.qml` | `graphite-bar --restart` through `hyprctl dispatch exec` |
+| Quickshell bar and launcher (default) | `~/.config/quickshell/graphite-bar/Colors.qml` | `graphite-bar --restart` through `hyprctl dispatch exec` |
 | Waybar (opt-out bar) | `current/waybar.css` (imported) | `graphite-bar --restart` through `hyprctl dispatch exec` |
 | kitty | `current/kitty.conf` (include) | SIGUSR1 |
-| rofi | `current/rofi.rasi` (@import) | next launch |
+| rofi (launcher with Waybar) | `current/rofi.rasi` (@import) | next launch |
 | mako | `~/.config/mako/config` (owned) | `makoctl reload` |
 | hyprlock | `current/hyprlock.conf` (sourced) | next lock |
 | GTK / Qt | gtk settings.ini, qt6ct, gsettings | live / next launch |
