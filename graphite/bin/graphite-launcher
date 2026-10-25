@@ -4,10 +4,15 @@
 # Falls back to rofi when the Quickshell bar is not running (e.g. `graphite bar waybar`).
 #   graphite-launcher            toggle
 #   graphite-launcher query TEXT print the top result for TEXT (scripts/tests)
-ipc() { timeout 5 qs ipc -c graphite-bar call launcher "$@" 2>/dev/null; }
+ipc() { timeout 20 qs ipc -c graphite-bar call launcher "$@" 2>/dev/null; }
 case ${1:-toggle} in
   toggle|open|close)
-    if pgrep -x qs >/dev/null && ipc "${1:-toggle}"; then exit 0; fi
+    if pgrep -x qs >/dev/null; then
+      ipc "${1:-toggle}"; rc=$?
+      # 0: done; 124: Quickshell is busy (do not open a second launcher); other: the running
+      # config has no launcher (an edited shell.qml), so use rofi.
+      ((rc == 0 || rc == 124)) && exit "$rc"
+    fi
     [[ ${1:-toggle} == close ]] && exit 0
     exec rofi -show drun ;;
   query) ipc query "${2:-}" ;;
