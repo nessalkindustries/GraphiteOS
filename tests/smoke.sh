@@ -17,7 +17,7 @@ qslog=$XDG_RUNTIME_DIR/qs.cur
 # default bar is Quickshell (namespace graphite-bar); BARNS=waybar for the opt-out checks
 BARNS=graphite-bar
 barup() { for _ in $(seq "${1:-30}"); do timeout 10 hyprctl layers 2>/dev/null | grep -q "namespace: $BARNS," && return 0; sleep 2; done; return 1; }
-qserr() { grep -aiE 'error|caused by|failed to load' "$qslog" 2>/dev/null | grep -v 'qt.svg' | head -4 | tr '\n' '|' | cut -c1-400; }
+qserr() { grep -aE 'ERROR|[Cc]aused by|[Ff]ailed to load configuration' "$qslog" 2>/dev/null | grep -av 'WARN\|qt.svg' | head -4 | tr '\n' '|' | cut -c1-400; }
 fails=0
 pkill -x hypridle 2>/dev/null   # no idle lock during the test (hyprlock crashes under TCG, see roadmap notes)
 wbtree() { for p in $(pgrep -x waybar); do echo -n "[$p ppid=$(ps -o ppid= -p $p|tr -d ' ') parent=$(ps -o comm= -p $(ps -o ppid= -p $p) 2>/dev/null) cg=$(cut -d: -f3 /proc/$p/cgroup|sed 's|.*/||') start=$(ps -o lstart= -p $p|awk '{print $4}')] "; done; }
