@@ -1,0 +1,17 @@
+# shellcheck shell=bash disable=SC2034,SC2154
+# Graphite repo signing keys for pacman (like archlinux-keyring).
+# Built by tools/build-repo.sh only for signed repos: GRAPHITE_KEYRING_DIR holds the
+# generated graphite.gpg / graphite-trusted / graphite-revoked (docs/key-rotation.md).
+pkgname=graphite-keyring
+pkgver=1
+pkgrel=1
+pkgdesc="Graphite [graphite] repository signing keys"
+arch=(any)
+url="https://github.com/nessalkindustries/GraphiteOS"
+license=(MIT)
+install=graphite-keyring.install
+
+package() {
+  local d=${GRAPHITE_KEYRING_DIR:?GRAPHITE_KEYRING_DIR not set}
+  install -Dm644 -t "$pkgdir/usr/share/pacman/keyrings" "$d/graphite.gpg" "$d/graphite-trusted" "$d/graphite-revoked"
+}

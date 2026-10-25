@@ -54,6 +54,13 @@ common_checks() {
     check "[graphite] repo requires signatures" 'sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep -q "^SigLevel = Required"'
     check "[graphite] key locally trusted" 'pacman-key --list-keys "$(cat /var/lib/graphite/repo/graphite.fpr)"'
     check "[graphite] db signature verifies" 'pacman -Sy --noconfirm >/dev/null && pacman -Si graphite-config'
+    # base-3: keyring package + remote repo
+    check "graphite-keyring installed and populated" 'pacman -Q graphite-keyring && pacman-key --list-keys "$(cat /var/lib/graphite/repo/graphite.fpr)" | grep -q "\[ *full *\]"'
+    if sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep -q "^Server = http"; then
+      check "[graphite] remote server listed first, local copy as fallback" 's=$(sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep "^Server"); [[ $(head -1 <<<"$s") == "Server = http"* && $(sed -n 2p <<<"$s") == "Server = file:///var/lib/graphite/repo" ]]'
+    fi
+    check "graphite repo status" 'o=$(graphite repo 2>&1) && grep -q "keyring: graphite-keyring" <<<"$o" && grep -q "graphite-config" <<<"$o"'
+    say "diag repo: $(graphite repo 2>&1 | tr '\n' ';')"
   else
     say "diag: [graphite] repo unsigned in this build"
   fi
@@ -65,10 +72,16 @@ case $stage in
   common_checks
   say "diag: enable sddm on the booted system -> $(systemctl enable sddm.service 2>&1 | tr '\n' ' ') rc=${PIPESTATUS[0]}"
   check "snapper root config" 'snapper -c root list'
-  say "running full pacman -Syu"
-  if pacman -Syu --noconfirm > "$ST/syu.log" 2>&1; then say "ok   pacman -Syu"; else say "FAIL pacman -Syu"; tail -20 "$ST/syu.log"; fails=$((fails+1)); fi
+  pre=$(pacman -Q graphite-config | cut -d" " -f2)
   say "running graphite update --yes (news check, -Syu, migrations, pacdiff)"
   if HOME=/root graphite update --yes > "$ST/update.log" 2>&1; then say "ok   graphite update"; else say "FAIL graphite update"; tail -20 "$ST/update.log"; fails=$((fails+1)); fi
+  if sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep -q "^Server = http"; then
+    post=$(pacman -Q graphite-config | cut -d" " -f2); say "diag remote update: graphite-config $pre -> $post"
+    check "graphite update pulled newer graphite-config from the remote repo" '[[ $post != "$pre" && $post == "$pre".* ]]'
+    check "graphite-keyring updated from the remote repo" '[[ $(pacman -Q graphite-keyring | cut -d" " -f2) == *.* ]]'
+  fi
+  say "running full pacman -Syu"
+  if pacman -Syu --noconfirm > "$ST/syu.log" 2>&1; then say "ok   pacman -Syu"; else say "FAIL pacman -Syu"; tail -20 "$ST/syu.log"; fails=$((fails+1)); fi
   check "graphite update took a labelled pre-update snapshot" 'grep -q "pre-update snapshot: #" "$ST/update.log" && snapper -c root list | grep -q "graphite update"'
   sed 's/^/  | /' "$ST/update.log" | tail -15
   say "installing cowsay (snap-pac pre/post) for the rollback test"

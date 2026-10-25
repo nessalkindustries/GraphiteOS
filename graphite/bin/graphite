@@ -16,6 +16,7 @@ Graphite command center ($(cat "$GRAPHITE_PATH/VERSION" 2>/dev/null || echo dev)
 
 Usage: graphite <command> [args]
   update [--yes] [--no-news]  Arch news check -> pacman -Syu -> migrations -> pacnew report
+  repo                        [graphite] repo status: servers, signature policy, trusted keys
   migrate [--pending]         run (or list) pending migrations for this user
   theme list|current|set N|pick   themes (colors.toml -> generated configs; Super+T)
   splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
@@ -73,6 +74,11 @@ update() {
   fi
   local pacargs=(-Syu)
   ((yes)) && pacargs+=(--noconfirm)
+  # new or rotated repo keys must be in the keyring before packages signed with them
+  # arrive (same pattern as archlinux-keyring); it is part of the same -Syu below
+  if pacman -Q graphite-keyring >/dev/null 2>&1; then
+    sudo pacman -Sy --needed "${pacargs[@]:1}" graphite-keyring
+  fi
   sudo pacman "${pacargs[@]}"
   date +%s > "$STATE_DIR/last-update"
   graphite-migrate
@@ -88,6 +94,20 @@ update() {
   if [[ ! -d /usr/lib/modules/$(uname -r) ]]; then
     echo "--- kernel updated: reboot to use the new kernel."
   fi
+}
+
+repo() {
+  echo "[graphite] servers (first that answers wins):"
+  sed -n '/^\[graphite\]/,/^\[/{/^Server/s/^Server = /  /p}' /etc/pacman.conf
+  echo "signatures: $(sed -n '/^\[graphite\]/,/^\[/{s/^SigLevel = //p}' /etc/pacman.conf)"
+  if pacman -Q graphite-keyring >/dev/null 2>&1; then
+    echo "keyring: $(pacman -Q graphite-keyring)"
+    echo "trusted keys:"; sed 's/:.*//; s/^/  /' /usr/share/pacman/keyrings/graphite-trusted
+    [[ -s /usr/share/pacman/keyrings/graphite-revoked ]] && { echo "revoked:"; sed 's/^/  /' /usr/share/pacman/keyrings/graphite-revoked; }
+  else
+    echo "keyring: graphite-keyring not installed (unsigned or older install)"
+  fi
+  echo "installed from [graphite]:"; pacman -Sl graphite 2>/dev/null | awk '$4=="[installed]"||$4~/installed/{print "  "$2" "$3}' || true
 }
 
 snapshots() { sudo snapper -c root list; }
@@ -188,6 +208,7 @@ splash() {
 cmd=${1:-help}; shift || true
 case $cmd in
   update) update "$@" ;;
+  repo) repo ;;
   migrate) graphite-migrate "$@" ;;
   theme) graphite-theme "$@" ;;
   keybinds) graphite-keybinds "$@" ;;

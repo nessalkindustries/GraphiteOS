@@ -1,0 +1,8 @@
+# load the shipped keys into pacman's keyring: trusted keys get signed by the local
+# master key, revoked keys are disabled (no-op until pacman-key --init has run)
+post_upgrade() {
+  if usr/bin/pacman-key -l >/dev/null 2>&1; then
+    usr/bin/pacman-key --populate graphite
+  fi
+}
+post_install() { post_upgrade; }

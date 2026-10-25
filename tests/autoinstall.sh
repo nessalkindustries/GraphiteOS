@@ -19,6 +19,8 @@ if curl -fsSL "$HOST/graphite-iso-install" -o /tmp/gii 2>/dev/null; then
   install -m755 /tmp/gii /usr/local/bin/graphite-iso-install; echo "harness: using overlay graphite-iso-install"
 fi
 export GRAPHITE_CACHE_SERVER="$HOST/pkg"
+# harness-served remote [graphite] repo (GRAPHITE_HARNESS_REPO), used like download.graphiteos.org
+if curl -fsS -o /dev/null "$HOST/repo/x86_64/graphite.db"; then export GRAPHITE_REPO_URL="$HOST/repo/\$arch"; fi
 graphite-iso-install --disk /dev/vda --user tester --password 'graphite-test' \
   --luks-pass 'graphite-luks' --hostname graphite-test --timezone America/Toronto \
   --profile "${GRAPHITE_TEST_PROFILE:-desktop}" --serial-console --selftest /tmp/selftest.sh --yes

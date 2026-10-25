@@ -14,6 +14,8 @@
 #   (GRAPHITE_IMAGE) and archiso by version (GRAPHITE_ARCHISO, installed from the Arch Linux Archive).
 #   With GRAPHITE_SNAPSHOT set, the container's own packages also come from that archive day.
 # Signed repo (docs/package-repo.md): GRAPHITE_SIGN_KEY=<gpg key id> signs packages + db.
+# GRAPHITE_REPO_URL: remote [graphite] mirror (e.g. https://download.graphiteos.org/repo/$arch) that
+#   installed systems update from; only used with a signed repo. Empty = local repo only.
 # PKGCACHE (default /var/cache/graphite-pkg) is shared with the container so
 # rebuilds and the QEMU harness (pacman CacheServer) don't re-download packages.
 set -euo pipefail
@@ -31,7 +33,7 @@ fi
 GRAPHITE_COMMIT=${GRAPHITE_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}
 GRAPHITE_IMAGE=${GRAPHITE_IMAGE:-docker.io/archlinux/archlinux@sha256:ef1b2d7b71ac9f1f5fe78b5ae66c3b3fa8f6f2a4486620233b7ed31b1d0c3aaf}
 GRAPHITE_ARCHISO=${GRAPHITE_ARCHISO:-91-1}
-export GRAPHITE_COMMIT SOURCE_DATE_EPOCH GRAPHITE_SNAPSHOT=${GRAPHITE_SNAPSHOT:-} GRAPHITE_SIGN_KEY=${GRAPHITE_SIGN_KEY:-}
+export GRAPHITE_COMMIT SOURCE_DATE_EPOCH GRAPHITE_SNAPSHOT=${GRAPHITE_SNAPSHOT:-} GRAPHITE_SIGN_KEY=${GRAPHITE_SIGN_KEY:-} GRAPHITE_REPO_URL=${GRAPHITE_REPO_URL:-}
 
 if [ "$CONTAINER" = 1 ]; then
   ENG=$(command -v podman || command -v docker) || { echo "need podman or docker"; exit 1; }
@@ -40,7 +42,7 @@ if [ "$CONTAINER" = 1 ]; then
   GNUPGMNT=""; [ -n "$GRAPHITE_SIGN_KEY" ] && GNUPGMNT="-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg"
   # shellcheck disable=SC2086
   exec sudo "$ENG" run --rm --privileged --network host -v "$PWD":/src -v "$OUT":/src/out $GNUPGMNT \
-    -e GRAPHITE_COMMIT="$GRAPHITE_COMMIT" -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -e GRAPHITE_SNAPSHOT="$GRAPHITE_SNAPSHOT" -e GRAPHITE_SIGN_KEY="$GRAPHITE_SIGN_KEY" \
+    -e GRAPHITE_COMMIT="$GRAPHITE_COMMIT" -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -e GRAPHITE_SNAPSHOT="$GRAPHITE_SNAPSHOT" -e GRAPHITE_SIGN_KEY="$GRAPHITE_SIGN_KEY" -e GRAPHITE_REPO_URL="$GRAPHITE_REPO_URL" \
     -e GRAPHITE_IMAGE="$GRAPHITE_IMAGE" -e GRAPHITE_ARCHISO="$GRAPHITE_ARCHISO" \
     -v "$PKGCACHE":/var/cache/pacman/pkg "$GRAPHITE_IMAGE" \
     bash -c 'set -e
@@ -57,10 +59,12 @@ fi
 
 # 1. overlay repo
 REPO_OUT="$OUT/graphite-repo" ./tools/build-repo.sh
+rm -f "$OUT/graphite-repo/graphite.url"
+if [ -n "$GRAPHITE_REPO_URL" ] && [ -f "$OUT/graphite-repo/graphite.pub" ]; then echo "$GRAPHITE_REPO_URL" > "$OUT/graphite-repo/graphite.url"; fi
 
 # 2. staged profile
 PROFILE=$(mktemp -d); trap 'rm -rf "$PROFILE"' EXIT
-tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite --exclude=./tests --exclude=./tools \
+tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite --exclude=./tests --exclude=./tools --exclude=./keys \
   -cf - . | tar -xf - -C "$PROFILE"
 if [ -n "$GRAPHITE_SNAPSHOT" ]; then
   # pin core/extra/multilib to one Arch Linux Archive day: same inputs -> same package set
@@ -100,6 +104,7 @@ done < <(find graphite -type f -perm -u+x | sort)
   echo "snapshot=${GRAPHITE_SNAPSHOT:-live-mirrors}"
   echo "archiso=$(pacman -Q archiso | cut -d' ' -f2)"
   echo "image=${GRAPHITE_IMAGE:-native}"
+  echo "repo_url=${GRAPHITE_REPO_URL:-none}"
   echo "signed_repo=$([ -n "$GRAPHITE_SIGN_KEY" ] && echo "$GRAPHITE_SIGN_KEY" || echo no)"
 } > "$OUT/build-info.txt"
 cp "$OUT/build-info.txt" "$A/opt/graphite/build-info.txt"
