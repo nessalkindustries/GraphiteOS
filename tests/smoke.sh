@@ -16,7 +16,9 @@ qslog=$XDG_RUNTIME_DIR/qs.cur
 # Hyprland 0.56 `hyprctl layers`: "... xywh: X Y W H, a: 1, namespace: graphite-bar, pid: N"
 # default bar is Quickshell (namespace graphite-bar); BARNS=waybar for the opt-out checks
 BARNS=graphite-bar
-barup() { for _ in $(seq "${1:-30}"); do timeout 10 hyprctl layers 2>/dev/null | grep -q "namespace: $BARNS," && return 0; sleep 2; done; return 1; }
+# hyprctl answers empty now and then under TCG load: retry until it lists layers
+hlayers() { local o; for _ in 1 2 3 4 5; do o=$(timeout 10 hyprctl layers 2>/dev/null); grep -q 'namespace:' <<<"$o" && { echo "$o"; return; }; sleep 2; done; }
+barup() { for _ in $(seq "${1:-30}"); do hlayers | grep -q "namespace: $BARNS," && return 0; sleep 2; done; return 1; }
 qserr() { grep -aE 'ERROR|[Cc]aused by|[Ff]ailed to load configuration' "$qslog" 2>/dev/null | grep -av 'WARN\|qt.svg' | head -4 | tr '\n' '|' | cut -c1-400; }
 fails=0
 pkill -x hypridle 2>/dev/null   # no idle lock during the test (hyprlock crashes under TCG, see roadmap notes)
@@ -65,8 +67,6 @@ echo "SMOKE: diag after teal: qs=[$(pgrep -a qs | tr "\n" "|" | cut -c1-300)] ba
 pgrep -x qs >/dev/null || echo "SMOKE: diag bar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 # launcher (desk-2): search through IPC, then open it the way Super+Space does
 lq() { timeout 25 graphite-launcher query "$1" 2>/dev/null; }
-# hyprctl answers empty now and then under TCG load: retry until it lists layers/binds
-hlayers() { local o; for _ in 1 2 3 4 5; do o=$(timeout 10 hyprctl layers 2>/dev/null); grep -q 'namespace:' <<<"$o" && { echo "$o"; return; }; sleep 2; done; }
 lmapped() { hlayers | grep -q 'namespace: graphite-launcher,'; }
 lgone() { local o; o=$(hlayers); grep -q 'namespace: graphite-bar,' <<<"$o" && ! grep -q 'namespace: graphite-launcher,' <<<"$o"; }
 spacebound() { for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: space" | grep -q "arg: graphite-launcher" && return 0; sleep 2; done; return 1; }
