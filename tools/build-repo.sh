@@ -12,8 +12,8 @@ REPO_OUT=${REPO_OUT:-$PWD/out/graphite-repo}
 if [[ ${1:-} == --container ]]; then
   ENG=$(command -v podman || command -v docker) || { echo "need podman or docker" >&2; exit 1; }
   mkdir -p "$REPO_OUT"
-  exec sudo "$ENG" run --rm --network host -v "$PWD":/src:ro -v "$REPO_OUT":/repo docker.io/archlinux/archlinux:latest \
-    -e GRAPHITE_SIGN_KEY="${GRAPHITE_SIGN_KEY:-}" -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" -e GRAPHITE_PKGREL_BUMP="${GRAPHITE_PKGREL_BUMP:-}" ${GRAPHITE_SIGN_KEY:+-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg} \
+  exec sudo "$ENG" run --rm --network host -v "$PWD":/src:ro -v "$REPO_OUT":/repo \
+    -e GRAPHITE_SIGN_KEY="${GRAPHITE_SIGN_KEY:-}" -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" -e GRAPHITE_PKGREL_BUMP="${GRAPHITE_PKGREL_BUMP:-}" ${GRAPHITE_SIGN_KEY:+-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg} docker.io/archlinux/archlinux:latest \
     bash -c "pacman -Sy --noconfirm --needed base-devel >/dev/null && REPO_OUT=/repo /src/tools/build-repo.sh"
 fi
 command -v makepkg >/dev/null || { echo "makepkg not found (use --container)" >&2; exit 1; }
