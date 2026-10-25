@@ -14,7 +14,8 @@ wbtree() { for p in $(pgrep -x waybar); do echo -n "[$p ppid=$(ps -o ppid= -p $p
 check() { if eval "$2" >/dev/null 2>&1; then echo "SMOKE: ok   $1"; else echo "SMOKE: FAIL $1"; fails=$((fails+1)); fi; }
 check "Hyprland running" 'pgrep -x Hyprland'
 check "hyprctl answers" 'hyprctl version'
-check "bar (waybar) loaded and mapped" 'pgrep -x waybar && barup 60'
+check "bar (waybar) loaded and mapped" 'barup 90'
+barup 1 || echo "SMOKE: diag login bar: $(wbtree) gb=$(pgrep -af graphite-bar | tr '\n' ' ') log: $(grep -a 'graphite-bar\|configure' $wblog 2>/dev/null | tail -12 | tr '\n' '|') cur: $(tail -5 $XDG_RUNTIME_DIR/waybar.cur 2>/dev/null | tr '\n' '|') jr: $(journalctl -b -t graphite-bar --no-pager -o cat 2>/dev/null | tail -8 | tr "\n" "|") load: $(cut -d' ' -f1-3 /proc/loadavg) up: $(cut -d' ' -f1 /proc/uptime)"
 before=$(hyprctl clients 2>/dev/null | grep -c "class: kitty")
 hyprctl dispatch exec kitty >/dev/null 2>&1
 for _ in $(seq 60); do [ "$(hyprctl clients 2>/dev/null | grep -c 'class: kitty')" -gt "$before" ] && break; sleep 2; done

@@ -6,7 +6,14 @@
 2. Boots the installed disk repeatedly (-no-reboot: each guest reboot ends one
    QEMU run). Types the LUKS passphrase on the serial console, navigates GRUB to
    the Snapper snapshot submenu on the 2nd boot, and collects SELFTEST lines.
-Usage: tests/qemu-install.py [ISO] [--profile desktop|full] [--keep-disk] [--smoke-only]
+Usage: tests/qemu-install.py [ISO] [--profile desktop|full] [--keep-disk] [--smoke-only] [--secureboot] [--no-smoke]
+--secureboot: Secure Boot capable OVMF (SMM, empty key store = Setup Mode). After the normal run, one boot
+  enrolls keys with `graphite secureboot setup` (tests/sb-enroll.sh), then a boot with Secure Boot enforced
+  must reach the system and pass tests/sb-verify.sh. Adds a swtpm TPM 2.0 (needs swtpm): GRUB's lockdown
+  only loads kernels via the tpm verifier.
+--sb-only: with --secureboot, reuse an installed disk (+ its boot logs) and only run the two Secure Boot
+  boots, with a fresh Setup Mode key store; --overlay-secureboot uses this checkout's graphite-secureboot.
+--no-smoke: skip the desktop smoke boot. GRAPHITE_HARNESS_OUT overrides the output directory.
 Results: out/harness/{install,boot-N}.log, out/harness/result.txt
 Needs: qemu-system-x86_64, OVMF (4M), 7z, python3; host package cache at
 /var/cache/graphite-pkg (filled by build.sh) is served to the guest as a
@@ -14,13 +21,16 @@ pacman CacheServer so the install doesn't re-download everything.
 """
 import socket, glob, http.server, os, re, shutil, socketserver, subprocess, sys, threading, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "out", "harness")
+OUT = os.environ.get("GRAPHITE_HARNESS_OUT") or os.path.join(ROOT, "out", "harness")
+SECUREBOOT = "--secureboot" in sys.argv
+SB_ONLY = SECUREBOOT and "--sb-only" in sys.argv
+NO_SMOKE = "--no-smoke" in sys.argv or SB_ONLY
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 PROFILE = "full" if "--profile=full" in sys.argv or ("--profile" in sys.argv and sys.argv[sys.argv.index("--profile")+1] == "full") else "desktop"
 ISO = args[0] if args else max(glob.glob(os.path.join(ROOT, "out", "graphite-2*.iso")), key=os.path.getmtime)
 LUKS = "graphite-luks"
 PORT = int(os.environ.get("GRAPHITE_HARNESS_PORT", "8765"))
-OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd" if SECUREBOOT else "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS_SRC = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 os.makedirs(OUT, exist_ok=True)
 DISK = os.path.join(OUT, "disk.qcow2"); VARS = os.path.join(OUT, "ovmf_vars.fd")
@@ -39,6 +49,9 @@ with open(os.path.join(ROOT, "tests", "patch-selftest.sh")) as f:
     open(os.path.join(www, "patch-selftest.sh"), "w").write(f.read().replace("@HOST@", host))
 LIVE_SCRIPT = "patch-selftest.sh" if ("--patch-selftest" in sys.argv and "--keep-disk" in sys.argv) else "autoinstall.sh"
 shutil.copy(os.path.join(ROOT, "tests", "selftest.sh"), www)
+for f in ("sb-enroll.sh", "sb-verify.sh"): open(os.path.join(www, f), "w").write(open(os.path.join(ROOT, "tests", f)).read().replace("@HOST@", host))
+if "--overlay-secureboot" in sys.argv:
+    shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite-secureboot"), os.path.join(www, "graphite-secureboot"))
 open(os.path.join(www, "smoke.sh"), "w").write(open(os.path.join(ROOT, "tests", "smoke.sh")).read().replace("@HOST@", host))
 shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite"), os.path.join(www, "graphite-bin"))
 if "--overlay-installer" in sys.argv:  # test a fixed installer without rebuilding the ISO
@@ -59,19 +72,31 @@ subprocess.run(["7z", "e", "-y", f"-o{kd}", ISO, "graphite/boot/x86_64/vmlinuz-l
 label = subprocess.run(["sh", "-c", f"dd if='{ISO}' bs=1 skip=32808 count=32 2>/dev/null"], capture_output=True).stdout.decode().strip()
 note(f"ISO {os.path.basename(ISO)} label={label} profile={PROFILE}")
 
-if ("--keep-disk" not in sys.argv and "--smoke-only" not in sys.argv) or not os.path.exists(DISK):
+if ("--keep-disk" not in sys.argv and "--smoke-only" not in sys.argv and "--sb-only" not in sys.argv) or not os.path.exists(DISK):
     subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", DISK, "40G"], check=True)
     shutil.copy(OVMF_VARS_SRC, VARS)
 
 # Deadlines use the monotonic clock: the box can be frozen for many minutes (session cut-offs) while
 # the wall clock keeps running, which fired harness timeouts early (run 4: smoke killed 23 s after SHOT).
 def qemu(extra, logname, timeout, on_line=None, done=None):
-    cmd = ["qemu-system-x86_64", "-machine", "q35", "-accel", "tcg,thread=multi", "-cpu", "max", "-m", "6144", "-smp", "4",
+    mach = ["-machine", "q35,smm=on", "-global", "driver=cfi.pflash01,property=secure,value=on"] if SECUREBOOT else ["-machine", "q35"]
+    cmd = ["qemu-system-x86_64"] + mach + ["-accel", "tcg,thread=multi", "-cpu", "max", "-m", "6144", "-smp", "4",
            "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
            "-drive", f"if=pflash,format=raw,file={VARS}",
            "-drive", f"file={DISK},if=virtio,format=qcow2,cache=unsafe",
            "-nic", "user,model=virtio-net-pci", "-display", "none", "-vga", "none", "-device", "virtio-vga",
            "-serial", "stdio", "-no-reboot", "-rtc", "base=utc"] + extra
+    if SECUREBOOT:
+        # GRUB in Secure Boot lockdown (no shim) only loads kernels when a verifier claims them; that is
+        # the tpm module, which needs a TPM. Real Secure Boot machines have one; QEMU gets swtpm (TPM 2.0).
+        tdir = os.path.join(OUT, "tpm"); os.makedirs(tdir, exist_ok=True); tsock = os.path.join(OUT, "tpm.sock")
+        if os.path.exists(tsock): os.remove(tsock)
+        subprocess.Popen(["swtpm", "socket", "--tpm2", "--tpmstate", f"dir={tdir}", "--ctrl", f"type=unixio,path={tsock}", "--terminate"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            if os.path.exists(tsock): break
+            time.sleep(0.1)
+        cmd += ["-chardev", f"socket,id=chrtpm,path={tsock}", "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"]
     log = open(os.path.join(OUT, logname), "wb")
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     buf = b""; start = time.monotonic(); state = {}
@@ -99,8 +124,9 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
 def send(p, s):
     p.stdin.write(s.encode()); p.stdin.flush()
 
-SMOKE_ONLY = "--smoke-only" in sys.argv   # reuse disk + boot logs of the previous run, only redo the smoke boot
-if SMOKE_ONLY and not os.path.exists(DISK): sys.exit("--smoke-only needs an existing disk")
+SMOKE_ONLY = "--smoke-only" in sys.argv or SB_ONLY   # reuse disk + boot logs of the previous run, only redo the smoke boot
+if SMOKE_ONLY and not os.path.exists(DISK): sys.exit("--smoke-only/--sb-only needs an existing disk")
+if SB_ONLY: shutil.copy(OVMF_VARS_SRC, VARS)   # fresh key store (Setup Mode); boots via the removable BOOTX64.EFI
 # --- 1. install from the live ISO ------------------------------------------
 t0 = time.monotonic()
 append = (f"archisobasedir=graphite archisolabel={label} console=tty0 console=ttyS0,115200 "
@@ -117,19 +143,30 @@ def make_handler(boot):
     def h(text, p, st):
         if re.search(r"Enter passphrase for|A password is required to access", text[-600:]) and not st.get(("pw", text.count("passphrase"))):
             st[("pw", text.count("passphrase"))] = 1; time.sleep(1); send(p, LUKS + "\r")
-        if boot == 2 and st.get("seq", 99) < 5:
-            # open submenu, skip header -> newest snapshot, open, skip header -> first kernel, boot.
-            # Each key is sent only after GRUB redrew the highlight for the previous one; resent after 20 s.
-            keys = ["\r", "\x1b[B", "\r", "\x1b[B", "\r"]
-            n = st.get("hl", 0); now = time.monotonic()
-            if st["mark"] < 0 or n > st["mark"] or (now - st["kt"] > 20 and "keys to select" in text[-4000:] and "passphrase" not in text[-4000:]):
-                if st["mark"] >= 0 and n > st["mark"]: st["seq"] += 1
-                if st["seq"] < 5:
-                    time.sleep(1.5); n = st.get("hl", 0)
-                    send(p, keys[st["seq"]]); st["mark"] = n; st["kt"] = time.monotonic()
-                else:
-                    st["seq"] = 6; note("boot 2: snapshot entry booted (sequenced keys)")
+        if boot == 2 and st.get("ph") in ("list", "kern"):
+            # Navigate by the highlighted row's text, not by counting keys: a GRUB redraw (e.g. the
+            # text->gfx console switch seen with the Secure Boot OVMF) can look like a highlight move,
+            # and Enter on a submenu's title row just returns to the previous menu.
+            # list: Down to the newest snapshot row, Enter. kern: Down to the vmlinuz-linux entry, Enter.
+            now = time.monotonic()
+            if now - st.get("kt", 0) < 2.0: return
+            hl = re.findall(r"H\*([^\r\n\x1b]*)", text[-6000:])
+            if not hl: return
+            cur = hl[-1]; n = st.get("hl", 0)
+            if n == st.get("mark") and now - st["kt"] < 20: return   # wait for GRUB to redraw after the last key
+            if "Date" in cur and "Snapshot" in cur: st["ph"] = "list"   # back on the snapshot list (header)
+            if st["ph"] == "list":
+                if "@snapshots/" in cur and "Date" not in cur:
+                    send(p, "\r"); st["ph"] = "kern"
+                else: send(p, "\x1b[B")
+            else:
+                if "vmlinuz-linux &" in cur:
+                    send(p, "\r"); st["ph"] = "done"; note("boot 2: snapshot entry booted (text-driven keys)")
+                elif st.get("kd", 0) < 6: send(p, "\x1b[B"); st["kd"] = st.get("kd", 0) + 1
+                else: send(p, "\x1b"); st["ph"] = "list"; st["kd"] = 0   # lost: back to the list
+            st["mark"] = n; st["kt"] = now
             return
+        if boot == 2 and st.get("ph") == "done": pass
         if boot == 2 and "grub" not in st and ("Use the" in text and "keys to select" in text):
             # step Down until the highlighted row (drawn as "*<title>") is the grub-btrfs submenu;
             # its position depends on the distro name and firmware entries, so don't count
@@ -138,7 +175,7 @@ def make_handler(boot):
                 return
             hl = re.findall(r"H\*([^\r\n\x1b]*)", text)
             if hl and "snapshots" in hl[-1]:
-                st["grub"] = 1; st["seq"] = 0; st["mark"] = -1
+                st["grub"] = 1; send(p, "\r"); st["ph"] = "list"; st["kt"] = now; st["mark"] = st.get("hl", 0)
                 note(f"boot 2: GRUB 'snapshots' highlighted after {st.get('nav', 0)} Downs")
             elif st.get("nav", 0) < 40:
                 st["nav"] = st.get("nav", 0) + 1; st["nav_t"] = now; send(p, "\x1b[B")
@@ -150,7 +187,7 @@ for boot in ([] if SMOKE_ONLY else range(1, 7)):
     if "SELFTEST: ALL DONE" in out:
         break
 # --- 3. screenshot boot: SDDM (harness autologin) -> Hyprland desktop -------
-if any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.glob(os.path.join(OUT, "boot-*.log"))):
+if not NO_SMOKE and any("SELFTEST: ALL DONE" in open(f, errors="replace").read() for f in glob.glob(os.path.join(OUT, "boot-*.log"))):
     sock = os.path.join(OUT, "mon.sock"); ppm = os.path.join(OUT, "installed.ppm")
     def shot(text, p, st):
         if "login:" in text and "t" not in st:
@@ -189,7 +226,32 @@ allout = "".join(open(f).read() for f in sorted(glob.glob(os.path.join(OUT, "boo
 fails = sorted(set(re.findall(r"SELFTEST: FAIL[^\r\n]*", allout)))
 shotlog = open(os.path.join(OUT, "boot-shot.log"), errors="replace").read() if os.path.exists(os.path.join(OUT, "boot-shot.log")) else ""
 fails += sorted(set(re.findall(r"@SMOKE: FAIL[^\r\n]*", shotlog)))
-if "@SMOKE: DONE" not in shotlog: fails.append("SMOKE: did not finish")
+if "@SMOKE: DONE" not in shotlog and not NO_SMOKE: fails.append("SMOKE: did not finish")
+# --- 4. Secure Boot: enroll keys + sign, then boot with Secure Boot enforced --
+def sb_boot(script, logname, marker):
+    def h(text, p, st):
+        make_handler(5)(text, p, st)
+        if "login:" in text and "t" not in st: st["t"] = time.monotonic()
+        if "t" in st and "go" not in st and time.monotonic() - st["t"] > 60:
+            st["go"] = 1; send(p, "tester\r"); time.sleep(4); send(p, "graphite-test\r"); time.sleep(6)
+            send(p, f"curl -fsS {host}/{script} -o /tmp/{script} && echo graphite-test | sudo -S bash /tmp/{script} 2>&1 | sed 's/^/@/'\r")
+        for m in re.findall(r"@SB: ([^\r\n]*)[\r\n]", text):
+            if ("sb", m) not in st: st[("sb", m)] = 1; note("SB: " + m)
+    t = time.monotonic()
+    out = qemu([], logname, 3 * 3600, on_line=h)
+    note(f"{logname} ended after {int(time.monotonic()-t)}s")
+    return out
+if SECUREBOOT and "SELFTEST: ALL DONE" in allout:
+    shutil.copy(VARS, os.path.join(OUT, "ovmf_vars.before-enroll.fd"))
+    e = sb_boot("sb-enroll.sh", "boot-sb-enroll.log", "ENROLL DONE")
+    if "@SB: ENROLL DONE" not in e: fails.append("SB: enroll boot did not finish")
+    fails += sorted(set(re.findall(r"@SB: FAIL[^\r\n]*", e)))
+    if "@SB: ENROLL DONE" in e:
+        v = sb_boot("sb-verify.sh", "boot-sb-verify.log", "VERIFY DONE")
+        if "@SB: VERIFY DONE" not in v: fails.append("SB: Secure Boot boot did not reach the system / verify did not finish")
+        fails += sorted(set(re.findall(r"@SB: FAIL[^\r\n]*", v)))
+        if re.search(r"Access Denied|Security Violation|prohibited by secure boot policy", v):
+            note("SB: firmware/GRUB refused something: " + "; ".join(sorted(set(re.findall(r"[^\r\n]*(?:Access Denied|Security Violation|prohibited by secure boot policy)[^\r\n]*", v))))[:400])
 done = "SELFTEST: ALL DONE" in allout
 note(f"RESULT: {'PASS' if done and not fails else 'FAIL'} (all-done={done}, failures={len(fails)})")
 for f in fails: note("  " + f)
