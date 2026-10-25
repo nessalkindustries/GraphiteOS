@@ -48,3 +48,20 @@ The four random-ID files are also a privacy issue: today every live boot of one 
 ## Known gaps
 - Without `GRAPHITE_SNAPSHOT`, live mirrors are used and builds are only reproducible on the same day.
 - Byte-identical ISOs: not yet. A double build differs only in the files listed above. Graphite packages and all other files are identical.
+
+## GitHub Actions build (manual only)
+`.github/workflows/build-iso.yml` runs the same pinned container build on a GitHub runner. It
+**never runs on its own**: there's no push, PR or schedule trigger. Start it from the Actions tab →
+*Build ISO* → *Run workflow*. Inputs:
+- `snapshot`: the Arch Linux Archive day (required, `YYYY/MM/DD`)
+- `nvidia`: build the NVIDIA ISO instead
+- `expected_sha256`: the SHA-256 of an ISO you built locally from the same commit and snapshot. The run
+  summary says whether the CI ISO matches it. This is an independent second build on different hardware.
+- `upload_iso`: also keep the ISO as an artifact (about 3 GB, 3 days)
+
+The run summary shows `build-info.txt` and `SHA256SUMS` (the ISO plus every Graphite package). These
+are also uploaded as the `graphite-checksums` artifact (30 days). The CI build is **unsigned**
+because the repo signing key never goes to GitHub. Signed builds and publishing stay local
+(docs/package-repo.md). Nothing is published as a GitHub release.
+`tests/ci-check.sh` enforces manual-only triggers, a read-only token, and no secrets or releases in
+every workflow.

@@ -1,7 +1,8 @@
 # Hardware test checklist
 
 Graphite is only QEMU-tested so far. Use this on real machines and file one
-issue per machine (copy the list, tick what works, note what doesn't).
+issue per machine with the **Hardware report** issue form (New issue → Hardware report),
+which has the same fields; or copy this list into a blank issue.
 
 ## Machine
 - [ ] Vendor / model:

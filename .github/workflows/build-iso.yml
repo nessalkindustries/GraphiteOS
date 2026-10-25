@@ -1,0 +1,95 @@
+# Reproducible ISO build + checksums. Manual trigger only (Actions tab -> "Build ISO" -> Run workflow):
+# no push/PR/schedule triggers, so it never runs (or costs minutes) on its own.
+# Builds unsigned: the repo signing key never leaves the maintainer's machine (docs/package-repo.md).
+# Output: workflow artifacts (ISO + SHA256SUMS + build-info + package list) and the checksums in
+# the run summary. Nothing is published as a GitHub release.
+name: Build ISO
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: "Arch Linux Archive day YYYY/MM/DD (pins the package set)"
+        required: true
+        default: "2026/10/23"
+      nvidia:
+        description: "Build the NVIDIA ISO instead of the standard one"
+        type: boolean
+        default: false
+      expected_sha256:
+        description: "Optional: SHA-256 of an ISO built locally from the same commit + snapshot; the run reports match/mismatch"
+        required: false
+        default: ""
+      upload_iso:
+        description: "Upload the ISO itself as an artifact (about 3 GB, kept 3 days); checksums are always uploaded"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: build-iso
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Free disk space (the ISO build needs ~20 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af >/dev/null || true
+          df -h /
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Validate inputs
+        env:
+          SNAP: ${{ inputs.snapshot }}
+          EXP: ${{ inputs.expected_sha256 }}
+        run: |
+          [[ $SNAP =~ ^[0-9]{4}/[0-9]{2}/[0-9]{2}$ ]] || { echo "::error::snapshot must be YYYY/MM/DD"; exit 1; }
+          [[ -z $EXP || $EXP =~ ^[0-9a-f]{64}$ ]] || { echo "::error::expected_sha256 must be 64 hex chars"; exit 1; }
+      - name: Build (pinned container image, archiso, snapshot; SOURCE_DATE_EPOCH = commit time)
+        env:
+          GRAPHITE_SNAPSHOT: ${{ inputs.snapshot }}
+          NVIDIA: ${{ inputs.nvidia }}
+        run: |
+          sudo apt-get install -y podman >/dev/null 2>&1 || true
+          args=(--container); [[ $NVIDIA == true ]] && args+=(--nvidia)
+          ./build.sh "${args[@]}"
+      - name: Checksums
+        id: sums
+        env:
+          EXP: ${{ inputs.expected_sha256 }}
+        run: |
+          cd out
+          iso=$(find . -maxdepth 1 -name '*.iso' -printf '%T@ %f\n' | sort -nr | head -1 | cut -d' ' -f2)
+          sudo chown -R "$(id -u)" .
+          sha256sum "$iso" > SHA256SUMS
+          (cd graphite-repo && sha256sum -- *.pkg.tar.zst) | sed 's|  |  graphite-repo/|' >> SHA256SUMS
+          sha=$(sha256sum "$iso" | cut -d' ' -f1)
+          {
+            echo "## $iso"
+            echo '```'; cat build-info.txt; echo '```'
+            echo "### SHA256SUMS"
+            echo '```'; cat SHA256SUMS; echo '```'
+            if [[ -n $EXP ]]; then
+              [[ $EXP == "$sha" ]] && echo "**Reproducible: matches the expected SHA-256.**" \
+                || echo "**Differs from the expected SHA-256 ($EXP).** See docs/reproducible-builds.md for how to find the differing files."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "iso=$iso" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graphite-checksums
+          path: |
+            out/SHA256SUMS
+            out/build-info.txt
+            out/build-packages.txt
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_iso
+        with:
+          name: graphite-iso
+          path: out/${{ steps.sums.outputs.iso }}
+          compression-level: 0
+          retention-days: 3

@@ -1,0 +1,79 @@
+name: Hardware report
+description: Report how Graphite runs on a real machine (one issue per machine)
+title: "[hardware] <vendor> <model>"
+labels: ["hardware-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Graphite on real hardware. The full checklist is in docs/hardware-test-checklist.md.
+        Please don't paste serial numbers, MAC addresses, or other personal identifiers.
+  - type: input
+    id: model
+    attributes: {label: Vendor / model, placeholder: "Lenovo ThinkPad T14 Gen 3"}
+    validations: {required: true}
+  - type: input
+    id: cpu
+    attributes: {label: CPU, placeholder: "AMD Ryzen 7 PRO 6850U"}
+    validations: {required: true}
+  - type: input
+    id: gpu
+    attributes: {label: GPU(s), description: "Note hybrid graphics", placeholder: "AMD Radeon 680M"}
+    validations: {required: true}
+  - type: input
+    id: ramdisk
+    attributes: {label: RAM / disk, placeholder: "16 GB / NVMe 512 GB"}
+  - type: dropdown
+    id: firmware
+    attributes:
+      label: Firmware boot mode
+      options: ["UEFI, Secure Boot off", "UEFI, Secure Boot on", "BIOS / legacy"]
+    validations: {required: true}
+  - type: input
+    id: iso
+    attributes: {label: ISO file name, placeholder: graphite-2026.10.25-x86_64.iso}
+    validations: {required: true}
+  - type: checkboxes
+    id: sha
+    attributes:
+      label: Checksum
+      options:
+        - label: "I checked the ISO with `sha256sum -c SHA256SUMS`"
+  - type: textarea
+    id: buildinfo
+    attributes:
+      label: build-info.txt
+      description: "Output of `cat /opt/graphite/build-info.txt` (live ISO) or `cat /var/lib/graphite/src/build-info.txt` (installed)"
+      render: text
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      options:
+        - label: Live ISO boots
+        - label: Display at native resolution
+        - label: Keyboard / touchpad / mouse
+        - label: Wi-Fi
+        - label: Ethernet
+        - label: Installer finished
+        - label: LUKS prompt works on first boot
+        - label: GRUB shows Graphite, LTS and snapshots
+        - label: Login + Hyprland start
+        - label: Audio (speakers, headphones, mic)
+        - label: Suspend / resume
+        - label: Brightness / volume keys
+        - label: Battery shown (laptops)
+        - label: Bluetooth
+        - label: External display
+        - label: graphite update works
+  - type: textarea
+    id: problems
+    attributes:
+      label: What doesn't work
+      description: Steps, error messages, and when it happens
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: "`journalctl -b -p warning --no-pager | tail -n 200`, `lspci -nnk`"
+      render: text
