@@ -134,6 +134,18 @@ if [[ -f $REPO_SRC/graphite.pub ]]; then
   arch-chroot "$MNT" pacman-key --add /var/lib/graphite/repo/graphite.pub >/dev/null
   arch-chroot "$MNT" pacman-key --lsign-key "$(cat "$REPO_SRC/graphite.fpr")" >/dev/null
   sed -i '/^\[graphite\]/,/^$/s/^SigLevel = .*/SigLevel = Required/' "$MNT/etc/pacman.conf"
+  # remote mirror (base-3): updates come from it, the copy on disk stays as fallback.
+  # GRAPHITE_REPO_URL overrides the URL baked into the ISO (graphite.url).
+  url=${GRAPHITE_REPO_URL:-$(cat "$REPO_SRC/graphite.url" 2>/dev/null || true)}
+  if [[ -n $url ]]; then
+    log "[graphite] remote repo: $url"
+    sed -i "/^\[graphite\]/,/^\$/s#^Server = file://#Server = $url\nServer = file://#" "$MNT/etc/pacman.conf"
+  fi
+  # graphite-keyring takes over key management (rotation/revocation via package updates);
+  # installed from the local copy, the remote may not be reachable during install
+  for k in "$REPO_SRC"/graphite-keyring-*.pkg.tar.zst; do
+    if [[ -f $k ]]; then arch-chroot "$MNT" pacman -U --noconfirm "/var/lib/graphite/repo/${k##*/}"; fi
+  done
 fi
 [[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[\(core\|extra\|multilib\)\]$/a CacheServer = $GRAPHITE_CACHE_SERVER" "$MNT/etc/pacman.conf"
 ln -sf "/usr/share/zoneinfo/$TZ_" "$MNT/etc/localtime"

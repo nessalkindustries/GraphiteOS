@@ -13,6 +13,9 @@ Usage: tests/qemu-install.py [ISO] [--profile desktop|full] [--keep-disk] [--smo
   only loads kernels via the tpm verifier.
 --sb-only: with --secureboot, reuse an installed disk (+ its boot logs) and only run the two Secure Boot
   boots, with a fresh Setup Mode key store; --overlay-secureboot uses this checkout's graphite-secureboot.
+GRAPHITE_HARNESS_REPO=<signed repo dir>: served as the remote [graphite] repo (host/repo/x86_64) during install;
+  GRAPHITE_HARNESS_REPO_NEXT=<dir> (same key, pkgrel bumped) replaces it after install, so `graphite update`
+  must pull the newer packages from the "remote" (base-3).
 --no-smoke: skip the desktop smoke boot. GRAPHITE_HARNESS_OUT overrides the output directory.
 Results: out/harness/{install,boot-N}.log, out/harness/result.txt
 Needs: qemu-system-x86_64, OVMF (4M), 7z, python3; host package cache at
@@ -58,6 +61,12 @@ if "--overlay-installer" in sys.argv:  # test a fixed installer without rebuildi
     shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite-iso-install"), os.path.join(www, "graphite-iso-install"))
 if os.path.isdir("/var/cache/graphite-pkg"):
     os.symlink("/var/cache/graphite-pkg", os.path.join(www, "pkg"))
+REMOTE = os.environ.get("GRAPHITE_HARNESS_REPO"); REMOTE_NEXT = os.environ.get("GRAPHITE_HARNESS_REPO_NEXT")
+def serve_repo(d):
+    link = os.path.join(www, "repo", "x86_64"); os.makedirs(os.path.dirname(link), exist_ok=True)
+    if os.path.lexists(link): os.remove(link)
+    os.symlink(os.path.abspath(d), link)
+if REMOTE: serve_repo(REMOTE)
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **k): super().__init__(*a, directory=www, **k)
     def log_message(self, *a): pass
@@ -135,6 +144,8 @@ inst = "GRAPHITE-INSTALL: OK" if SMOKE_ONLY else qemu(["-kernel", f"{kd}/vmlinuz
              "-cdrom", ISO], "install.log", 4 * 3600)
 ok = "GRAPHITE-INSTALL: OK" in inst
 note(f"INSTALL {'OK' if ok else 'FAILED'} in {int(time.monotonic()-t0)}s")
+if REMOTE and REMOTE_NEXT:
+    serve_repo(REMOTE_NEXT); note(f"remote repo: now serving {REMOTE_NEXT} (pkgrel bumped)")
 if not ok:
     sys.exit(1)
 
