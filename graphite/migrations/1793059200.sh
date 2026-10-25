@@ -20,13 +20,11 @@ if [[ -f $skel/$d/shell.qml && -f $f ]] && ! cmp -s "$skel/$d/shell.qml" "$f"; t
     echo "  kept your edited $d/shell.qml; add 'Launcher { id: launcher }' (see shell.qml.graphite-new)"
   fi
 fi
-# Hyprland: $menu -> graphite-launcher (only the shipped rofi default), blur rule for the launcher
+# Hyprland: $menu -> graphite-launcher (only the shipped rofi default)
 h=$HOME/.config/hypr/hyprland.conf
 if [[ -f $h ]]; then
   # shellcheck disable=SC2016  # literal $menu
   sed -i 's/^\$menu = rofi -show drun$/$menu = graphite-launcher/' "$h"
-  grep -q 'match:namespace graphite-launcher' "$h" ||
-    printf '\n# Blur behind the Quickshell launcher (Graphite desk-2)\nlayerrule = blur on, ignore_alpha 0.3, match:namespace graphite-launcher\n' >> "$h"
 fi
 # reload the bar so the launcher is available now
 if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && pgrep -x qs >/dev/null; then
