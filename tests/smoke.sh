@@ -2,8 +2,14 @@
 # Desktop smoke test, run as the logged-in user in the harness screenshot boot.
 # Prints "SMOKE: ok|FAIL <name>" lines and a final "SMOKE: DONE fails=N".
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
-HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1)
-export HYPRLAND_INSTANCE_SIGNATURE
+# Use the Hyprland instance that answers (newest first). After a VM stall the session can be
+# restarted, leaving a dead instance dir behind; wait up to 3 min for a live one.
+for _ in $(seq 90); do
+  for HYPRLAND_INSTANCE_SIGNATURE in $(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null); do
+    export HYPRLAND_INSTANCE_SIGNATURE; timeout 5 hyprctl version >/dev/null 2>&1 && break 2
+  done; sleep 2
+done
+echo "SMOKE: diag instance=$HYPRLAND_INSTANCE_SIGNATURE of $(ls "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | wc -l) up=$(cut -d' ' -f1 /proc/uptime)"
 WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -E '^wayland-[0-9]+$' | head -1); export WAYLAND_DISPLAY
 wblog=$XDG_RUNTIME_DIR/graphite-waybar.log
 qslog=$XDG_RUNTIME_DIR/qs.cur
