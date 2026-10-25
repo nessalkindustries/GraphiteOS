@@ -145,6 +145,10 @@ inst = "GRAPHITE-INSTALL: OK" if SMOKE_ONLY else qemu(["-kernel", f"{kd}/vmlinuz
 ok = "GRAPHITE-INSTALL: OK" in inst
 note(f"INSTALL {'OK' if ok else 'FAILED'} in {int(time.monotonic()-t0)}s")
 if REMOTE and REMOTE_NEXT:
+    # pacman only re-downloads a db whose mtime is newer than its local copy: a real publish
+    # always is, but repo-next may have been built before the ISO's repo
+    now = time.time()
+    for f in glob.glob(os.path.join(REMOTE_NEXT, "graphite.*")): os.utime(f, (now, now))
     serve_repo(REMOTE_NEXT); note(f"remote repo: now serving {REMOTE_NEXT} (pkgrel bumped)")
 if not ok:
     sys.exit(1)

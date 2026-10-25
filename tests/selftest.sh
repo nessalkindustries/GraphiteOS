@@ -59,7 +59,7 @@ common_checks() {
     if sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep -q "^Server = http"; then
       check "[graphite] remote server listed first, local copy as fallback" 's=$(sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep "^Server"); [[ $(head -1 <<<"$s") == "Server = http"* && $(sed -n 2p <<<"$s") == "Server = file:///var/lib/graphite/repo" ]]'
     fi
-    check "graphite repo status" 'graphite repo | grep -q "keyring: graphite-keyring"'
+    check "graphite repo status" 'o=$(graphite repo 2>&1) && grep -q "keyring: graphite-keyring" <<<"$o" && grep -q "graphite-config" <<<"$o"'
     say "diag repo: $(graphite repo 2>&1 | tr '\n' ';')"
   else
     say "diag: [graphite] repo unsigned in this build"
