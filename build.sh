@@ -64,7 +64,7 @@ if [ -n "$GRAPHITE_REPO_URL" ] && [ -f "$OUT/graphite-repo/graphite.pub" ]; then
 
 # 2. staged profile
 PROFILE=$(mktemp -d); trap 'rm -rf "$PROFILE"' EXIT
-tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite --exclude=./tests --exclude=./tools \
+tar --exclude=./out --exclude=./split --exclude=./.git --exclude=./graphite --exclude=./tests --exclude=./tools --exclude=./keys \
   -cf - . | tar -xf - -C "$PROFILE"
 if [ -n "$GRAPHITE_SNAPSHOT" ]; then
   # pin core/extra/multilib to one Arch Linux Archive day: same inputs -> same package set
