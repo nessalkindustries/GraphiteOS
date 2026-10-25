@@ -18,6 +18,7 @@ Usage: graphite <command> [args]
   update [--yes] [--no-news]  Arch news check -> pacman -Syu -> migrations -> pacnew report
   repo                        [graphite] repo status: servers, signature policy, trusted keys
   migrate [--pending]         run (or list) pending migrations for this user
+  bar [status|quickshell|waybar]  which bar runs: Quickshell (default) or Waybar (opt-out)
   theme list|current|set N|pick   themes (colors.toml -> generated configs; Super+T)
   splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
   keybinds                    keybinding cheatsheet (also Super+K)
@@ -205,11 +206,35 @@ splash() {
   echo "boot splash: $action"
 }
 
+# --- bar: Quickshell (default) or Waybar; graphite-bar starts whichever is chosen ---
+bar() {
+  local f=${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar cur
+  cur=$(cat "$f" 2>/dev/null || true); [[ $cur == waybar ]] || cur=quickshell
+  case ${1:-status} in
+    status)
+      echo "bar: $cur$([[ -f $f ]] || echo " (default)")"
+      if pgrep -x qs >/dev/null; then echo "running: quickshell"; elif pgrep -x waybar >/dev/null; then echo "running: waybar"; else echo "running: none"; fi ;;
+    quickshell|waybar)
+      mkdir -p "${f%/*}"; echo "$1" > "$f"
+      echo "bar set to $1"
+      if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+        # through Hyprland, so the bar gets the compositor's environment (see graphite-theme)
+        timeout 10 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+        sleep 1; for _ in $(seq 180); do pgrep -f 'graphite-bar --restart' >/dev/null || break; sleep 0.5; done
+        bar status | tail -1
+      else
+        echo "takes effect at the next login"
+      fi ;;
+    *) echo "usage: graphite bar [status|quickshell|waybar]" >&2; return 1 ;;
+  esac
+}
+
 cmd=${1:-help}; shift || true
 case $cmd in
   update) update "$@" ;;
   repo) repo ;;
   migrate) graphite-migrate "$@" ;;
+  bar) bar "$@" ;;
   theme) graphite-theme "$@" ;;
   keybinds) graphite-keybinds "$@" ;;
   snapshots) snapshots ;;

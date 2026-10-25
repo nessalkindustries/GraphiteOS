@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Start waybar and make sure its layer actually maps. Under heavy load (software rendering in
+# Start the user's bar and make sure its layer actually maps. The bar is Quickshell (default) or
+# Waybar (opt-out): ~/.config/graphite/bar holds "quickshell" or "waybar" (`graphite bar ...`).
+# The other bar is stopped, so only one ever runs.
+# Waybar notes: Under heavy load (software rendering in
 # VMs) a waybar instance can miss the compositor's initial layer-shell configure ("Timed out
 # waiting for initial .configure"); such an instance never maps, even if it later logs
 # "Bar configured". Restart it as soon as that happens, otherwise give a slow start time.
@@ -11,34 +14,42 @@ wait=${GRAPHITE_BAR_WAIT:-60}
 rt=${XDG_RUNTIME_DIR:-/tmp}
 log=$rt/graphite-waybar.log
 exec 8>"$rt/graphite-bar.lock"; flock -w 120 8 || true
-mapped() { timeout 5 hyprctl layers 2>/dev/null | grep -q 'namespace: waybar'; }
+choice() { local b; b=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar" 2>/dev/null); [[ $b == waybar ]] && echo waybar || echo quickshell; }
+bar=$(choice)
+# quickshell runs as `qs` (layer namespace graphite-bar, see ~/.config/quickshell/graphite-bar/shell.qml)
+if [[ $bar == quickshell ]]; then proc=qs ns=graphite-bar other=waybar cmd='exec qs -c graphite-bar'
+else proc=waybar ns=waybar other=qs cmd='exec waybar'; fi
+cur=$rt/$proc.cur
+mapped() { timeout 5 hyprctl layers 2>/dev/null | grep -q "namespace: $ns,"; }
 # A layer can show up in `hyprctl layers` just before waybar gives up on its initial configure; that
 # surface is then dropped and never maps. Only count it as up once it stayed mapped for $settle s
 # without a configure timeout.
 settle=${GRAPHITE_BAR_SETTLE:-15}
-missed() { grep -q 'initial .configure' "$rt/waybar.cur" 2>/dev/null; }
+missed() { grep -q 'initial .configure' "$cur" 2>/dev/null; }
 stable() { for ((k = 0; k < settle; k++)); do missed && return 1; mapped || return 1; sleep 1; done; ! missed; }
 say() { echo "graphite-bar $(date +%T): $*" >>"$log"; logger -t graphite-bar -- "$*" 2>/dev/null; }
-stop() {
-  pkill -x waybar 2>/dev/null
-  for _ in $(seq 25); do pgrep -x waybar >/dev/null || break; sleep 0.2; done
-  pkill -9 -x waybar 2>/dev/null
+stop() {   # stop <process name>
+  pkill -x "$1" 2>/dev/null
+  for _ in $(seq 25); do pgrep -x "$1" >/dev/null || break; sleep 0.2; done
+  pkill -9 -x "$1" 2>/dev/null
 }
 # 8>&-: waybar must not inherit the lock fd, or it holds the lock for its lifetime and every
 # --restart (theme switch) blocks for the whole flock timeout
-start() { : >"$rt/waybar.cur"; setsid -f sh -c 'exec waybar >>"$1" 2>&1' sh "$rt/waybar.cur" 8>&-; }
-[[ ${1:-} == --restart ]] && { say "restart requested"; stop; }
+# shellcheck disable=SC2016  # $1 expands in the inner sh
+start() { : >"$cur"; setsid -f sh -c "$cmd"' >>"$1" 2>&1' sh "$cur" 8>&-; }
+pgrep -x "$other" >/dev/null && { say "stopping $other (bar is $bar)"; stop "$other"; }
+[[ ${1:-} == --restart ]] && { say "restart requested"; stop "$proc"; }
 for ((i = 1; i <= tries; i++)); do
-  if ! pgrep -x waybar >/dev/null; then say "starting waybar (try $i/$tries)"; start; fi
+  if ! pgrep -x "$proc" >/dev/null; then say "starting $proc (try $i/$tries)"; start; fi
   for ((s = 0; s < wait * 2; s++)); do
-    mapped && stable && { say "waybar mapped and stable for ${settle}s (try $i)"; cat "$rt/waybar.cur" >>"$log" 2>/dev/null; exit 0; }
+    mapped && stable && { say "$proc mapped and stable for ${settle}s (try $i)"; cat "$cur" >>"$log" 2>/dev/null; exit 0; }
     if missed; then say "missed initial configure"; break; fi
     # waybar exited (e.g. early in the first login): restart now instead of idling out this try
-    if ((s > 2)) && ! pgrep -x waybar >/dev/null; then say "waybar exited: $(tail -2 "$rt/waybar.cur" 2>/dev/null | tr '\n' ' ')"; break; fi
+    if ((s > 2)) && ! pgrep -x "$proc" >/dev/null; then say "$proc exited: $(tail -2 "$cur" 2>/dev/null | tr '\n' ' ')"; break; fi
     sleep 0.5
   done
-  cat "$rt/waybar.cur" >>"$log" 2>/dev/null
-  say "waybar not mapped (try $i), restarting"; stop
+  cat "$cur" >>"$log" 2>/dev/null
+  say "$proc not mapped (try $i), restarting"; stop "$proc"
 done
-say "giving up after $tries tries"; pgrep -x waybar >/dev/null || start
+say "giving up after $tries tries"; pgrep -x "$proc" >/dev/null || start
 exit 1

@@ -50,7 +50,7 @@ render() {
   # files the theme owns outright (these programs have no include mechanism)
   mkdir -p "$HOME/.config/mako" "$HOME/.config/qt6ct" "$HOME/.config/gtk-3.0" "$HOME/.config/gtk-4.0"
   mv -f "$OUT/mako.config" "$HOME/.config/mako/config"
-  # Quickshell bar prototype: the singleton must sit next to shell.qml
+  # Quickshell bar (default): the colour singleton must sit next to shell.qml
   mkdir -p "$HOME/.config/quickshell/graphite-bar"
   mv -f "$OUT/quickshell-colors.qml" "$HOME/.config/quickshell/graphite-bar/Colors.qml"
   mv -f "$OUT/qt6ct.conf" "$HOME/.config/qt6ct/qt6ct.conf"
