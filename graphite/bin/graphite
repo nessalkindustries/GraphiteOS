@@ -25,6 +25,7 @@ Usage: graphite <command> [args]
   control [status|...]       control center: volume, brightness, Wi-Fi, Bluetooth, power, theme (Super+A)
   settings [get|set K V|...]  Settings app: appearance, display, input, network, about (Super+I)
   firstboot [open|reset|...]  guided first-boot setup (theme, wallpaper, privacy, profiles, Secure Boot)
+  gpu status|plan|setup       detect Intel/AMD/NVIDIA GPUs and install the matching driver stack
   keybinds                    keybinding cheatsheet (also Super+K)
   snapshots                   list Snapper snapshots of /
   rollback N                  make snapshot N the new root (reboot afterwards)
@@ -253,6 +254,7 @@ case $cmd in
   control) graphite-control "$@" ;;
   settings) graphite-settings "$@" ;;
   firstboot|welcome) graphite-firstboot "$@" ;;
+  gpu) graphite-gpu "$@" ;;
   snapshots) snapshots ;;
   rollback) rollback "$@" ;;
   splash) splash "$@" ;;

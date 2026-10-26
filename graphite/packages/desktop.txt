@@ -50,3 +50,5 @@ adw-gtk-theme
 gnome-themes-extra
 qt6ct
 dconf
+# lspci for graphite gpu (game-1)
+pciutils
