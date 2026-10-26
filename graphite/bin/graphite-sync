@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Local settings sync (eco-1). No cloud: a tarball, a folder (USB stick, NAS) or a git repo.
+#   graphite sync list                     what is included
+#   graphite sync export [DEST]            DEST: file.tar.gz, or a directory (gets a dated
+#                                          graphite-settings-*.tar.gz); default ~/graphite-settings-*.tar.gz
+#   graphite sync export --git DIR         copy the settings into git repo DIR and commit
+#                                          (init on first use; push yourself if you want)
+#   graphite sync import SRC [--yes]       SRC: tarball, export folder or git repo; the current
+#                                          settings are backed up to ~/.local/state/graphite/ first
+# Included: theme/wallpaper/privacy/first-boot state (~/.config/graphite) and the configs for
+# Hyprland, Quickshell, kitty, rofi, Waybar, mako, MangoHud, fastfetch, gtk and PipeWire presets.
+# Never included: keyrings, SSH/GPG keys, browser profiles, passwords, caches.
+set -uo pipefail
+ITEMS=(graphite hypr quickshell kitty rofi waybar mako MangoHud fastfetch gtk-3.0 gtk-4.0 pipewire)
+C=$HOME/.config
+help() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; }
+present() { local i; for i in "${ITEMS[@]}"; do [[ -e $C/$i ]] && echo "$i"; done; }
+stamp() { date +%Y%m%d-%H%M%S-$$; }
+pack() {  # pack FILE
+  mapfile -t have < <(present)
+  ((${#have[@]})) || { echo "nothing to export" >&2; return 1; }
+  tar -C "$C" --exclude='*.sock' --exclude='cache' -czf "$1" "${have[@]}"
+}
+unpack() {  # unpack SRC -> prints a directory holding the items
+  local src=$1 t
+  if [[ -f $src ]]; then t=$(mktemp -d); tar -C "$t" -xzf "$src" || return 1; echo "$t"
+  elif [[ -d $src/config ]]; then echo "$src/config"
+  elif [[ -d $src ]]; then echo "$src"
+  else echo "not found: $src" >&2; return 1; fi
+}
+
+case ${1:-} in
+  list) printf 'included (present now): %s\n' "$(present | tr '\n' ' ')"; printf 'all items: %s\n' "${ITEMS[*]}" ;;
+  export)
+    if [[ ${2:-} == --git ]]; then
+      d=${3:?usage: graphite sync export --git DIR}
+      command -v git >/dev/null || { echo "git is not installed (sudo pacman -S git)" >&2; exit 1; }
+      mkdir -p "$d/config" && [[ -d $d/.git ]] || git -C "$d" init -q || exit 1
+      t=$(mktemp) && pack "$t" && find "$d/config" -mindepth 1 -delete && tar -C "$d/config" -xzf "$t" && rm -f "$t" || exit 1
+      git -C "$d" add -A || exit 1
+      if git -C "$d" diff --cached --quiet; then echo "no changes in $d"
+      else git -C "$d" -c user.name="${USER:-graphite}" -c user.email="${USER:-graphite}@localhost" commit -qm "graphite settings $(date -Is)" && echo "exported to git repo $d"; fi
+    else
+      dest=${2:-$HOME}
+      [[ -d $dest ]] && dest=$dest/graphite-settings-$(stamp).tar.gz
+      pack "$dest" && echo "exported to $dest"
+    fi ;;
+  import)
+    src=${2:?usage: graphite sync import SRC [--yes]}
+    dir=$(unpack "$src") || exit 1
+    mapfile -t got < <(cd "$dir" && for i in "${ITEMS[@]}"; do [[ -e $i ]] && echo "$i"; done)
+    ((${#got[@]})) || { echo "no Graphite settings in $src" >&2; exit 1; }
+    echo "will replace: ${got[*]}"
+    if [[ ${3:-} != --yes ]]; then read -r -p "Continue? [y/N] " a; [[ $a == [yY]* ]] || exit 1; fi
+    b=$HOME/.local/state/graphite; mkdir -p "$b"; bk=$b/sync-backup-$(stamp).tar.gz
+    pack "$bk" && echo "backup: $bk" || exit 1
+    for i in "${got[@]}"; do rm -rf "${C:?}/$i"; cp -a "$dir/$i" "$C/$i"; done
+    [[ -f $src ]] && rm -rf "$dir"
+    command -v hyprctl >/dev/null && hyprctl reload >/dev/null 2>&1
+    command -v graphite-theme >/dev/null && graphite-theme apply >/dev/null 2>&1
+    echo "imported ${#got[@]} items (log out and in for everything to apply)" ;;
+  -h|--help|help) help ;;
+  *) help >&2; exit 1 ;;
+esac

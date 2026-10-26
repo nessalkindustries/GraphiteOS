@@ -29,6 +29,7 @@ Usage: graphite <command> [args]
   audio status|default|lowlatency [Q]  PipeWire latency presets (rtkit realtime)
   perf status|kernel zen|tune gaming   opt-in linux-zen kernel and gaming sysctl/power preset
   profile status|gaming|creator|...    install a workload profile (Steam/gamescope, OBS/VA-API/NVENC)
+  sync list|export|import              settings to/from a tarball, folder/USB or git repo (no cloud)
   keybinds                    keybinding cheatsheet (also Super+K)
   snapshots                   list Snapper snapshots of /
   rollback N                  make snapshot N the new root (reboot afterwards)
@@ -261,6 +262,7 @@ case $cmd in
   audio) graphite-audio "$@" ;;
   perf) graphite-perf "$@" ;;
   profile) graphite-profile "$@" ;;
+  sync) graphite-sync "$@" ;;
   snapshots) snapshots ;;
   rollback) rollback "$@" ;;
   splash) splash "$@" ;;
