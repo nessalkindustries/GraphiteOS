@@ -1,0 +1,8 @@
+# creator profile (game-4): OBS with PipeWire screen capture (xdg-desktop-portal-hyprland,
+# in desktop.txt) and hardware encoders: VA-API on Intel/AMD, NVENC through nvidia-utils
+obs-studio
+libva-utils
+v4l2loopback-dkms
+v4l2loopback-utils
+# headers for the dkms virtual camera module on the default kernel
+linux-headers

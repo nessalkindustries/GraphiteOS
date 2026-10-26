@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Workload profiles (game-4). Each installs a graphite-NAME meta package from the signed repo.
+#   graphite profile status            which profiles are installed, plus what each one enables
+#   graphite profile plan NAME         packages NAME would add (no changes)
+#   graphite profile gaming            Steam/Proton, gamemode, MangoHud, Lutris, Wine and a
+#                                      "Steam (gamescope)" session in the login screen
+#   graphite profile creator           OBS Studio with PipeWire screen capture, VA-API (Intel/AMD)
+#                                      or NVENC (NVIDIA) encoding, v4l2loopback virtual camera
+#   graphite profile dev|nvidia        developer tools / NVIDIA driver stack
+# Gaming tips: Steam launch option 'gamemoderun mangohud %command%'; Proton is enabled in
+# Steam > Settings > Compatibility.
+set -uo pipefail
+NAMES="gaming creator dev nvidia"
+installed() { pacman -Qq "$1" >/dev/null 2>&1; }
+help() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
+valid() { [[ " $NAMES " == *" $1 "* ]] || { echo "unknown profile: $1 (one of: $NAMES)" >&2; exit 1; }; }
+missing() { pacman -Si "graphite-$1" 2>/dev/null | sed -n 's/^Depends On *: //p' | tr ' ' '\n' | sed 's/[<>=].*//' | grep -v '^None$' | while read -r p; do [[ -n $p ]] && ! installed "$p" && echo "$p"; done; }
+
+case ${1:-status} in
+  status)
+    for n in $NAMES; do if installed "graphite-$n"; then echo "$n=installed"; else echo "$n=available"; fi; done
+    if installed graphite-gaming; then
+      echo "gaming: gamemode $(id -nG | grep -qw gamemode && echo 'group ok' || echo 'not in group gamemode'), session $([[ -f /usr/share/wayland-sessions/graphite-gamescope.desktop ]] && echo 'Steam (gamescope)' || echo missing)"
+    fi
+    if installed graphite-creator; then
+      enc=$(vainfo 2>/dev/null | grep -c 'VAEntrypointEncSlice' || true)
+      echo "creator: VA-API encode entrypoints ${enc:-0}$(installed nvidia-utils && echo ', NVENC via nvidia-utils')"
+    fi ;;
+  plan)
+    n=${2:?usage: graphite profile plan NAME}; valid "$n"
+    if installed "graphite-$n"; then echo "graphite-$n is installed"; else echo "would install: graphite-$n $(missing "$n" | tr '\n' ' ')"; fi ;;
+  gaming|creator|dev|nvidia)
+    n=$1
+    if ((EUID == 0)); then pacman -S --needed "graphite-$n"; else sudo pacman -S --needed "graphite-$n"; fi || exit 1
+    case $n in
+      gaming) echo "gaming: log out and pick 'Steam (gamescope)' in the login screen for a console-style session" ;;
+      creator) echo "creator: in OBS add 'Screen Capture (PipeWire)'; Settings > Output > Encoder: FFmpeg VAAPI (Intel/AMD) or NVENC (NVIDIA)" ;;
+    esac ;;
+  -h|--help|help) help ;;
+  *) help >&2; exit 1 ;;
+esac

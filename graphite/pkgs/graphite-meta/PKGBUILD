@@ -1,9 +1,9 @@
 # shellcheck shell=bash disable=SC2034,SC2154
 # Graphite meta-packages: dependency lists only (generated from packages/*.txt).
 pkgbase=graphite-meta
-pkgname=(graphite-desktop graphite-gaming graphite-dev graphite-nvidia)
+pkgname=(graphite-desktop graphite-gaming graphite-dev graphite-nvidia graphite-creator)
 pkgver=0.3.0
-pkgrel=10
+pkgrel=11
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"
 license=(MIT)
@@ -16,8 +16,14 @@ package_graphite-desktop() {
   depends+=(graphite-config networkmanager)
 }
 package_graphite-gaming() {
-  pkgdesc="Graphite gaming stack (Steam, gamemode, MangoHud, Lutris, Wine)"
+  pkgdesc="Graphite gaming stack (Steam, gamemode, MangoHud, gamescope session, Lutris, Wine)"
   mapfile -t depends < <(_list gaming)
+  install -Dm644 "${GRAPHITE_SRC:-$startdir/../..}/system/usr/share/wayland-sessions/graphite-gamescope.desktop" \
+    "$pkgdir/usr/share/wayland-sessions/graphite-gamescope.desktop"
+}
+package_graphite-creator() {
+  pkgdesc="Graphite creator stack (OBS Studio, VA-API/NVENC, PipeWire capture, virtual camera)"
+  mapfile -t depends < <(_list creator)
 }
 package_graphite-dev() {
   pkgdesc="Graphite developer tools"

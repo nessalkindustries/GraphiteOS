@@ -42,7 +42,7 @@ timeout 10 qs ipc -c graphite-firstboot call firstboot step 2 >/dev/null 2>&1; s
 echo "SMOKE: SHOT firstboot-privacy"; sleep 3
 check "first-boot: privacy toggles (recent files off and on)" 'graphite-firstboot privacy set recent off && grep -q "gtk-recent-files-enabled=false" ~/.config/gtk-3.0/settings.ini && graphite-firstboot privacy set recent on && [ "$(graphite-firstboot privacy get | grep -c =on)" = 3 ]'
 check "first-boot: news opt-out is honored by graphite update" 'graphite-firstboot privacy set news off && [ -f ~/.config/graphite/privacy/no-news ] && graphite-firstboot privacy set news on && [ ! -f ~/.config/graphite/privacy/no-news ]'
-check "first-boot: profiles and Secure Boot hint answer" '[ "$(graphite-firstboot profiles | grep -cE "^(gaming|dev|nvidia)=(installed|available)$")" = 3 ] && graphite-firstboot secureboot | grep -qi "secure boot"'
+check "first-boot: profiles and Secure Boot hint answer" '[ "$(graphite-firstboot profiles | grep -cE "^(gaming|creator|dev|nvidia)=(installed|available)$")" = 4 ] && graphite-firstboot secureboot | grep -qi "secure boot"'
 check "first-boot: bundled wallpapers listed" '[ -n "$(graphite-firstboot wallpapers)" ]'
 graphite-firstboot finish >/dev/null 2>&1
 for _ in $(seq 10); do ! timeout 10 hyprctl clients | grep -q "title: Graphite Setup" && break; sleep 3; done
@@ -274,4 +274,9 @@ check "perf: status lists linux and linux-lts" 'graphite perf status | grep -q "
 check "perf: kernel plan offers linux-zen" 'graphite perf kernel plan | grep -q "linux-zen linux-zen-headers"'
 check "perf: gaming preset written and removed" 'r=$(mktemp -d) && GRAPHITE_ROOT=$r graphite perf tune gaming >/dev/null && grep -q "^kernel.split_lock_mitigate = 0" $r/etc/sysctl.d/95-graphite-perf.conf && GRAPHITE_ROOT=$r graphite perf status | grep -q "tuning:   gaming" && GRAPHITE_ROOT=$r graphite perf tune default >/dev/null && [ ! -e $r/etc/sysctl.d/95-graphite-perf.conf ]'
 check "perf: preset keys exist on this kernel" '(for k in kernel.split_lock_mitigate vm.compaction_proactiveness vm.dirty_bytes kernel.sched_autogroup_enabled; do [ -e /proc/sys/${k//.//} ] || [ $k = kernel.split_lock_mitigate ] || exit 1; done)'
+# workload profiles (game-4): the full install has gaming; creator stays available
+check "profile: status shows gaming installed, creator available" 'graphite profile status | grep -qx gaming=installed && graphite profile status | grep -qx creator=available'
+check "profile: gamescope session in the login screen" 'pacman -Qq gamescope && grep -q "^Exec=gamescope" /usr/share/wayland-sessions/graphite-gamescope.desktop'
+check "profile: creator plan lists OBS" 'graphite profile plan creator | grep -q "obs-studio"'
+check "profile: rejects an unknown profile" '! graphite profile plan bogus 2>/dev/null'
 echo "SMOKE: DONE fails=$fails"
