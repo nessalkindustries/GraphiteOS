@@ -3,7 +3,7 @@
 # Never overwrites files owned by other packages (rule: overlay, not replacement).
 pkgname=graphite-config
 pkgver=0.3.0
-pkgrel=5
+pkgrel=6
 pkgdesc="Graphite defaults: CLI, themes, user config skeleton, system drop-ins"
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"
@@ -29,6 +29,8 @@ package() {
   cp -r "$src"/config/. "$pkgdir/etc/skel/.config/"
   # launcher declutter: per-user NoDisplay overrides (pacman never touches ~/.local)
   install -Dm644 -t "$pkgdir/etc/skel/.local/share/applications" "$src"/local-apps/*.desktop
+  # notification daemon by D-Bus activation: the Quickshell bar, mako only for the Waybar opt-out
+  install -Dm644 -t "$pkgdir/etc/skel/.local/share/dbus-1/services" "$src"/dbus-services/*.service
   # assets
   install -Dm644 -t "$pkgdir/usr/share/backgrounds/graphite" "$src"/assets/backgrounds/*
   install -Dm644 "$src/assets/fastfetch/logo.txt" "$share/fastfetch/logo.txt"

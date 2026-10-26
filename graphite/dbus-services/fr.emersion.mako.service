@@ -1,0 +1,5 @@
+# Graphite: notifications are shown by the Quickshell bar (mako only with the Waybar opt-out).
+# Same file name as mako's, so this per-user copy overrides /usr/share/dbus-1/services.
+[D-BUS Service]
+Name=org.freedesktop.Notifications
+Exec=/usr/bin/graphite-notify activate

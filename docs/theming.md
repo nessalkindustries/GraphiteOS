@@ -7,11 +7,11 @@ or `~/.config/graphite/themes/<name>/`. `graphite-theme set <name>` (or Super+T)
 | Component | Source | Reload |
 |---|---|---|
 | Hyprland borders/gaps | `current/hyprland.conf` (sourced) | `hyprctl reload` |
-| Quickshell bar and launcher (default) | `~/.config/quickshell/graphite-bar/Colors.qml` | `graphite-bar --restart` through `hyprctl dispatch exec` |
+| Quickshell bar, launcher and notifications (default) | `~/.config/quickshell/graphite-bar/Colors.qml` | `graphite-bar --restart` through `hyprctl dispatch exec` |
 | Waybar (opt-out bar) | `current/waybar.css` (imported) | `graphite-bar --restart` through `hyprctl dispatch exec` |
 | kitty | `current/kitty.conf` (include) | SIGUSR1 |
 | rofi (launcher with Waybar) | `current/rofi.rasi` (@import) | next launch |
-| mako | `~/.config/mako/config` (owned) | `makoctl reload` |
+| mako (notifications with the Waybar opt-out) | `~/.config/mako/config` (owned) | `makoctl reload` |
 | hyprlock | `current/hyprlock.conf` (sourced) | next lock |
 | GTK / Qt | gtk settings.ini, qt6ct, gsettings | live / next launch |
 | SDDM | static Graphite teal greeter (system-wide, runs before any user theme) | n/a |

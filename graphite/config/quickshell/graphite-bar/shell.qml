@@ -20,6 +20,8 @@ ShellRoot {
 
     // the launcher (Super+Space): apps, calculator, commands. See Launcher.qml
     Launcher { id: launcher }
+    // notification daemon, popups, center and do-not-disturb. See Notifications.qml
+    Notifications { id: notifications }
 
     // ---- audio: default sink via PipeWire (bind it so volume/mute are live) ----
     readonly property var sink: Pipewire.defaultAudioSink
@@ -186,6 +188,16 @@ ShellRoot {
                         }
                     }
 
+                    // notifications: bell (count / do-not-disturb); click opens the center
+                    Glyph {
+                        text: notifications.dnd ? "󰂛" : notifications.count > 0 ? "󰂚" : "󰂜"
+                        color: notifications.dnd ? Colors.muted : notifications.count > 0 ? Colors.accent : Colors.foreground
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: e => e.button === Qt.RightButton ? notifications.setDnd(!notifications.dnd)
+                                                                       : notifications.centerOpen = !notifications.centerOpen
+                        }
+                    }
                     Glyph {
                         text: "󰐥"; color: Colors.red
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.run("graphite-menu power") }

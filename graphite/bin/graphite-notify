@@ -1,0 +1,37 @@
+#!/bin/bash
+# Graphite notifications: the notification center and do-not-disturb.
+# The daemon is the Quickshell bar (~/.config/quickshell/graphite-bar/Notifications.qml);
+# with the Waybar opt-out it is mako.
+#   graphite-notify [center]        toggle the notification center (Super+N)
+#   graphite-notify dnd [on|off|toggle]   do-not-disturb (prints the state)
+#   graphite-notify count|list|clear      notifications of this session
+#   graphite-notify activate        D-Bus activation: start the right daemon
+#                                   (~/.local/share/dbus-1/services/fr.emersion.mako.service)
+state=${XDG_STATE_HOME:-$HOME/.local/state}/graphite/dnd
+bar() { b=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar" 2>/dev/null); [[ $b == waybar ]] && echo waybar || echo quickshell; }
+ipc() { timeout 20 qs ipc -c graphite-bar call notifications "$@" 2>/dev/null; }
+qsup() { [[ $(bar) == quickshell ]] && pgrep -x qs >/dev/null; }
+case ${1:-center} in
+  center|toggle|open|close)
+    c=${1:-center}; [[ $c == center ]] && c=toggle
+    if qsup; then ipc "$c"; else makoctl restore 2>/dev/null; fi ;;
+  dnd)
+    want=${2:-}
+    if qsup; then ipc dnd "${want:-get}"; exit; fi
+    cur=off; [[ -e $state ]] && cur=on
+    case $want in toggle) [[ $cur == on ]] && want=off || want=on ;; on|off) ;; '') echo "$cur"; exit 0 ;;
+      *) echo "usage: graphite-notify dnd [on|off|toggle]" >&2; exit 1 ;; esac
+    mkdir -p "${state%/*}"
+    if [[ $want == on ]]; then : >"$state"; makoctl mode -a do-not-disturb >/dev/null 2>&1
+    else rm -f "$state"; makoctl mode -r do-not-disturb >/dev/null 2>&1; fi
+    echo "$want" ;;
+  count) if qsup; then ipc count; else makoctl list 2>/dev/null | grep -c '^Notification'; fi ;;
+  list) if qsup; then ipc list; else makoctl history 2>/dev/null | sed -n 's/^Notification [0-9]*: //p'; fi ;;
+  clear) if qsup; then ipc clear; else makoctl dismiss -a 2>/dev/null; fi ;;
+  activate)
+    # someone sent a notification while no daemon owned the name
+    if [[ $(bar) == waybar ]]; then exec mako; fi
+    exec graphite-bar ;;
+  -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "usage: graphite-notify [center|dnd [on|off|toggle]|count|list|clear]" >&2; exit 1 ;;
+esac
