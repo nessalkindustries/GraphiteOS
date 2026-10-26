@@ -42,6 +42,7 @@ render() {
     sedargs+=(-e "s|{{$key}}|$val|g" -e "s|{{$key.hex}}|${val#\#}|g")
   done
   mkdir -p "$OUT"
+  command -v graphite-settings >/dev/null && graphite-settings init   # desk-6: settings.conf sourced by hyprland.conf
   for tpl in "$GRAPHITE_PATH"/templates/*.tpl; do
     sed "${sedargs[@]}" "$tpl" > "$OUT/$(basename "${tpl%.tpl}")"
   done
@@ -52,6 +53,8 @@ render() {
   mv -f "$OUT/mako.config" "$HOME/.config/mako/config"
   # Quickshell bar (default): the colour singleton must sit next to shell.qml
   mkdir -p "$HOME/.config/quickshell/graphite-bar"
+  mkdir -p "$HOME/.config/quickshell/graphite-settings"   # desk-6 Settings app uses the same palette
+  cp -f "$OUT/quickshell-colors.qml" "$HOME/.config/quickshell/graphite-settings/Colors.qml"
   mv -f "$OUT/quickshell-colors.qml" "$HOME/.config/quickshell/graphite-bar/Colors.qml"
   mv -f "$OUT/qt6ct.conf" "$HOME/.config/qt6ct/qt6ct.conf"
   cp -f "$OUT/gtk-settings.ini" "$HOME/.config/gtk-3.0/settings.ini"
