@@ -51,7 +51,7 @@ fi
 for ((i = 1; i <= tries; i++)); do
   if ! pgrep -x "$proc" >/dev/null; then say "starting $proc (try $i/$tries)"; start; fi
   for ((s = 0; s < wait * 2; s++)); do
-    mapped && stable && { say "$proc mapped and stable for ${settle}s (try $i)"; cat "$cur" >>"$log" 2>/dev/null; exit 0; }
+    mapped && stable && { say "$proc mapped and stable for ${settle}s (try $i)"; [[ $bar == quickshell ]] && pkill -x mako 2>/dev/null; cat "$cur" >>"$log" 2>/dev/null; exit 0; }
     if missed; then say "missed initial configure"; break; fi
     # waybar exited (e.g. early in the first login): restart now instead of idling out this try
     if ((s > 2)) && ! pgrep -x "$proc" >/dev/null; then say "$proc exited: $(tail -2 "$cur" 2>/dev/null | tr '\n' ' ')"; break; fi
