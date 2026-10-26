@@ -3,7 +3,7 @@
 # Never overwrites files owned by other packages (rule: overlay, not replacement).
 pkgname=graphite-config
 pkgver=0.3.0
-pkgrel=9
+pkgrel=10
 pkgdesc="Graphite defaults: CLI, themes, user config skeleton, system drop-ins"
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154  # S_* are set via declare in write()
 # Graphite settings backend + launcher (desk-6). The Settings app (Quickshell, Super+I) and
 # `graphite settings` both go through this script, so they read and write the same files:
 #   appearance -> graphite-theme / graphite bar      (~/.config/graphite/theme, .../bar)

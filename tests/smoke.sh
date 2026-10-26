@@ -209,4 +209,21 @@ pkill -x rofi 2>/dev/null; sleep 2
 timeout 900 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
 BARNS=graphite-bar; barup 90
 check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'
+# settings app (desk-6): graphite-settings backend + Quickshell window (Super+I)
+check "settings: settings.conf is generated and sourced" '[ -f ~/.config/graphite/settings.conf ] && grep -q "^source = ~/.config/graphite/settings.conf" ~/.config/hypr/hyprland.conf'
+check "Super+I is bound to Settings" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: i$" | grep -q "arg: graphite-settings" && exit 0; sleep 3; done; exit 1)'
+check "settings: get reports every key" '[ "$(timeout 30 graphite-settings get | grep -cE "^(scale|kb_layout|kb_variant|sensitivity|natural_scroll|follow_mouse|theme|bar|wifi)=")" -ge 9 ]'
+check "settings: natural scrolling applies to Hyprland" 'timeout 30 graphite-settings set natural_scroll true && timeout 10 hyprctl getoption input:touchpad:natural_scroll | grep -q "int: 1" && timeout 30 graphite-settings set natural_scroll false && timeout 10 hyprctl getoption input:touchpad:natural_scroll | grep -q "int: 0"'
+check "settings: pointer speed applies to Hyprland" 'timeout 30 graphite-settings set sensitivity 0.25 && timeout 10 hyprctl getoption input:sensitivity | grep -q "float: 0.25" && timeout 30 graphite-settings set sensitivity 0'
+check "settings: rejects a bad value" '! timeout 30 graphite-settings set scale banana 2>/dev/null'
+check "settings: about reports the system" 'timeout 30 graphite-settings about | grep -q "^kernel="'
+timeout 10 hyprctl dispatch exec "graphite-settings open" >/dev/null 2>&1
+for _ in $(seq 40); do timeout 10 hyprctl clients 2>/dev/null | grep -q "title: Graphite Settings" && break; sleep 3; done
+echo "SMOKE: SHOT settings"; sleep 5
+check "settings window opens" 'timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
+timeout 10 qs ipc -c graphite-settings call settings page about >/dev/null 2>&1; sleep 3
+echo "SMOKE: SHOT settings-about"; sleep 3
+timeout 20 graphite-settings close >/dev/null 2>&1
+for _ in $(seq 10); do ! timeout 10 hyprctl clients | grep -q "title: Graphite Settings" && break; sleep 3; done
+check "settings window closes" '! timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
 echo "SMOKE: DONE fails=$fails"
