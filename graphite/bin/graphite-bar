@@ -39,6 +39,14 @@ stop() {   # stop <process name>
 # shellcheck disable=SC2016  # $1 expands in the inner sh
 start() { : >"$cur"; setsid -f sh -c "$cmd"' >>"$1" 2>&1' sh "$cur" 8>&-; }
 pgrep -x "$other" >/dev/null && { say "stopping $other (bar is $bar)"; stop "$other"; }
+# notifications: the Quickshell bar is the notification daemon; mako only runs with Waybar
+if [[ $bar == quickshell ]]; then
+  pgrep -x mako >/dev/null && { say "stopping mako (Quickshell shows notifications)"; stop mako; }
+elif ! pgrep -x mako >/dev/null; then
+  setsid -f mako >/dev/null 2>&1 8>&-
+  dndf=${XDG_STATE_HOME:-$HOME/.local/state}/graphite/dnd
+  [[ -e $dndf ]] && (sleep 2; makoctl mode -a do-not-disturb >/dev/null 2>&1) &
+fi
 [[ ${1:-} == --restart ]] && { say "restart requested"; stop "$proc"; }
 for ((i = 1; i <= tries; i++)); do
   if ! pgrep -x "$proc" >/dev/null; then say "starting $proc (try $i/$tries)"; start; fi

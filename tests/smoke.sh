@@ -83,14 +83,49 @@ check "launcher finds apps (kitty)" '[ "$(lq kitty)" = "app: kitty" ]'
 check "launcher commands (>lock)" '[ "$(lq ">lock")" = "cmd: Lock screen" ]'
 check "launcher runs shell commands (>echo hi)" '[ "$(lq ">echo hi")" = "cmd: Run: echo hi" ]'
 check "launcher lists themes" '[ "$(lq "theme: nord")" = "cmd: Theme: graphite-nord" ]'
-timeout 10 hyprctl dispatch exec "graphite-launcher open >/tmp/gl.log 2>&1" >/dev/null 2>&1
-for _ in $(seq 40); do lmapped && break; sleep 3; done   # first open is slow under TCG
+# under TCG a dispatch (or the first map) can be lost: retry the open up to 3 times, and
+# require the layer to stay mapped across two reads
+lopen() { timeout 10 hyprctl dispatch exec "graphite-launcher open >/tmp/gl.log 2>&1" >/dev/null 2>&1
+  for _ in $(seq 30); do lmapped && sleep 2 && lmapped && return 0; sleep 3; done; return 1; }
+for a in 1 2 3; do lopen && break
+  echo "SMOKE: diag launcher open attempt $a: isOpen=$(timeout 5 qs ipc -c graphite-bar call launcher isOpen 2>&1) layers=$(hlayers | grep -o 'namespace: [a-z-]*' | tr '\n' ' ')"
+  timeout 25 graphite-launcher close >/dev/null 2>&1; sleep 3; done
 timeout 5 qs ipc -c graphite-bar call launcher query "" >/dev/null 2>&1   # show the app list in the shot
 echo "SMOKE: SHOT launcher"; sleep 8
 check "launcher opens (layer graphite-launcher mapped)" 'lmapped'
+check "launcher opened on the first try (attempts: $a)" '[ "$a" = 1 ]'
 lmapped || echo "SMOKE: diag launcher open: isOpen=$(timeout 5 qs ipc -c graphite-bar call launcher isOpen 2>&1) gl.log=$(tr '\n' '|' </tmp/gl.log 2>/dev/null | cut -c1-200) layers: $(timeout 10 hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | tr '\n' ' ') qslog: $(grep -a -i 'launcher\|error' "$qslog" 2>/dev/null | tail -5 | tr '\n' '|' | cut -c1-400)"
 timeout 25 graphite-launcher close >/dev/null 2>&1; for _ in $(seq 10); do lgone && break; sleep 3; done
 check "launcher closes" 'lgone'
+# notifications (desk-3): Quickshell is the daemon; popups, center (Super+N) and do-not-disturb
+nq() { timeout 25 graphite-notify "$@" 2>/dev/null; }
+nmapped() { hlayers | grep -q "namespace: $1,"; }
+nsend() { timeout 30 notify-send -a smoke "$@" >/dev/null 2>&1; }
+graphite-notify dnd off >/dev/null 2>&1
+# critical: stays until dismissed, so the popup is still up when checked under TCG
+n0=$(nq count); nsend -u critical "smoke hello" "from the harness"
+for _ in $(seq 20); do [ "$(nq count)" -gt "${n0:-0}" ] 2>/dev/null && break; sleep 2; done
+check "notifications go to Quickshell (graphite-notify count rises)" '[ "$(nq count)" -gt "${n0:-0}" ]'
+check "mako is not running with the Quickshell bar" '! pgrep -x mako'
+check "notification daemon is the Quickshell bar" 'busctl --user status org.freedesktop.Notifications 2>/dev/null | grep -q "^Comm=qs"'
+for _ in $(seq 20); do nmapped graphite-notifications && break; sleep 3; done
+echo "SMOKE: SHOT notification-popup"; sleep 5
+check "notification popup shows (layer graphite-notifications)" 'nmapped graphite-notifications'
+check "Super+N is bound to the notification center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: n$" | grep -q "arg: graphite-notify center" && exit 0; sleep 2; done; exit 1)'
+echo "SMOKE: diag notify: dnd=[$(nq dnd)] popups=[$(nq popups)] count=[$(nq count)]"
+check "do-not-disturb on" '[ "$(nq dnd on)" = on ] && [ -e "$HOME/.local/state/graphite/dnd" ]'
+p0=$(nq popups); c0=$(nq count); nsend "smoke quiet"; sleep 6
+echo "SMOKE: diag dnd: p0=[$p0] c0=[$c0] popups=[$(nq popups)] count=[$(nq count)] dnd=[$(nq dnd)]"
+check "do-not-disturb holds popups back but keeps the notification" '[ "$(nq popups)" -le "${p0:-0}" ] && [ "$(nq count)" -gt "${c0:-0}" ]'
+check "do-not-disturb off" '[ "$(nq dnd off)" = off ] && [ ! -e "$HOME/.local/state/graphite/dnd" ]'
+timeout 10 hyprctl dispatch exec "graphite-notify open" >/dev/null 2>&1
+for _ in $(seq 30); do nmapped graphite-notification-center && break; sleep 3; done
+echo "SMOKE: SHOT notification-center"; sleep 5
+check "notification center opens (layer graphite-notification-center)" 'nmapped graphite-notification-center'
+check "notification center lists the notification" 'nq list | grep -q "smoke hello"'
+nq close >/dev/null; nq clear >/dev/null
+for _ in $(seq 10); do ! nmapped graphite-notification-center && [ "$(nq count)" = 0 ] && break; sleep 3; done
+check "notification center closes and clears" '[ "$(nq count)" = 0 ] && ! nmapped graphite-notification-center'
 # bar widgets: tray/network/audio/battery come from the services, check the backends answer
 check "upower daemon answers (battery widget backend)" 'timeout 10 upower -e'
 check "graphite bar status reports quickshell" 'graphite bar status | grep -q "bar: quickshell"'
@@ -101,6 +136,7 @@ BARNS=waybar; barup 30
 echo "SMOKE: SHOT waybar-optout"; sleep 5
 check "opt-out: graphite bar waybar maps waybar, no quickshell" 'barup 5 && [ "$(pgrep -cx waybar)" = 1 ] && ! pgrep -x qs'
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
+check "opt-out: mako shows notifications with Waybar" '(for _ in $(seq 10); do pgrep -x mako >/dev/null && exit 0; sleep 2; done; exit 1)'
 # without Quickshell the launcher falls back to rofi
 timeout 10 hyprctl dispatch exec graphite-launcher >/dev/null 2>&1
 for _ in $(seq 15); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: rofi,' && break; sleep 2; done

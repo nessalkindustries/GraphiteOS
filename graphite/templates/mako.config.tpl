@@ -23,3 +23,7 @@ border-color={{border}}
 [urgency=critical]
 border-color={{red}}
 default-timeout=0
+
+# graphite-notify dnd (Waybar opt-out): hide popups
+[mode=do-not-disturb]
+invisible=1
