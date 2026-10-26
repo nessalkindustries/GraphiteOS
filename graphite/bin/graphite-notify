@@ -5,6 +5,7 @@
 #   graphite-notify [center]        toggle the notification center (Super+N)
 #   graphite-notify dnd [on|off|toggle]   do-not-disturb (prints the state)
 #   graphite-notify count|list|clear      notifications of this session
+#   graphite-notify popups          number of popups on screen
 #   graphite-notify activate        D-Bus activation: start the right daemon
 #                                   (~/.local/share/dbus-1/services/fr.emersion.mako.service)
 state=${XDG_STATE_HOME:-$HOME/.local/state}/graphite/dnd
@@ -17,7 +18,13 @@ case ${1:-center} in
     if qsup; then ipc "$c"; else makoctl restore 2>/dev/null; fi ;;
   dnd)
     want=${2:-}
-    if qsup; then ipc dnd "${want:-get}"; exit; fi
+    if qsup; then
+      # the bar persists the state asynchronously; mirror it here so it is on disk on return
+      r=$(ipc dnd "${want:-get}"); r=${r//\"/}
+      if [[ -n $want ]]; then mkdir -p "${state%/*}"; if [[ $r == on ]]; then : >"$state"; elif [[ $r == off ]]; then rm -f "$state"; fi; fi
+      [[ -n $r ]] && { echo "$r"; exit 0; }
+      exit 1
+    fi
     cur=off; [[ -e $state ]] && cur=on
     case $want in toggle) [[ $cur == on ]] && want=off || want=on ;; on|off) ;; '') echo "$cur"; exit 0 ;;
       *) echo "usage: graphite-notify dnd [on|off|toggle]" >&2; exit 1 ;; esac
@@ -26,6 +33,7 @@ case ${1:-center} in
     else rm -f "$state"; makoctl mode -r do-not-disturb >/dev/null 2>&1; fi
     echo "$want" ;;
   count) if qsup; then ipc count; else makoctl list 2>/dev/null | grep -c '^Notification'; fi ;;
+  popups) if qsup; then ipc popups; else echo 0; fi ;;   # popups on screen (Quickshell only)
   list) if qsup; then ipc list; else makoctl history 2>/dev/null | sed -n 's/^Notification [0-9]*: //p'; fi ;;
   clear) if qsup; then ipc clear; else makoctl dismiss -a 2>/dev/null; fi ;;
   activate)

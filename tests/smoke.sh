@@ -96,7 +96,8 @@ nq() { timeout 25 graphite-notify "$@" 2>/dev/null; }
 nmapped() { hlayers | grep -q "namespace: $1,"; }
 nsend() { timeout 30 notify-send -a smoke "$@" >/dev/null 2>&1; }
 graphite-notify dnd off >/dev/null 2>&1
-n0=$(nq count); nsend "smoke hello" "from the harness"
+# critical: stays until dismissed, so the popup is still up when checked under TCG
+n0=$(nq count); nsend -u critical "smoke hello" "from the harness"
 for _ in $(seq 20); do [ "$(nq count)" -gt "${n0:-0}" ] 2>/dev/null && break; sleep 2; done
 check "notifications go to Quickshell (graphite-notify count rises)" '[ "$(nq count)" -gt "${n0:-0}" ]'
 check "mako is not running with the Quickshell bar" '! pgrep -x mako'
@@ -105,8 +106,10 @@ for _ in $(seq 20); do nmapped graphite-notifications && break; sleep 3; done
 echo "SMOKE: SHOT notification-popup"; sleep 5
 check "notification popup shows (layer graphite-notifications)" 'nmapped graphite-notifications'
 check "Super+N is bound to the notification center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: n$" | grep -q "arg: graphite-notify center" && exit 0; sleep 2; done; exit 1)'
+echo "SMOKE: diag notify: dnd=[$(nq dnd)] popups=[$(nq popups)] count=[$(nq count)]"
 check "do-not-disturb on" '[ "$(nq dnd on)" = on ] && [ -e "$HOME/.local/state/graphite/dnd" ]'
 p0=$(nq popups); c0=$(nq count); nsend "smoke quiet"; sleep 6
+echo "SMOKE: diag dnd: p0=[$p0] c0=[$c0] popups=[$(nq popups)] count=[$(nq count)] dnd=[$(nq dnd)]"
 check "do-not-disturb holds popups back but keeps the notification" '[ "$(nq popups)" -le "${p0:-0}" ] && [ "$(nq count)" -gt "${c0:-0}" ]'
 check "do-not-disturb off" '[ "$(nq dnd off)" = off ] && [ ! -e "$HOME/.local/state/graphite/dnd" ]'
 timeout 10 hyprctl dispatch exec "graphite-notify open" >/dev/null 2>&1
