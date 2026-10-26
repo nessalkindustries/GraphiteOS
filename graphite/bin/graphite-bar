@@ -20,7 +20,8 @@ bar=$(choice)
 if [[ $bar == quickshell ]]; then proc=qs ns=graphite-bar other=waybar cmd='exec qs -c graphite-bar'
 else proc=waybar ns=waybar other=qs cmd='exec waybar'; fi
 cur=$rt/$proc.cur
-mapped() { timeout 5 hyprctl layers 2>/dev/null | grep -q "namespace: $ns,"; }
+# hyprctl sometimes answers empty under load: only an answer that lists layers counts as "not mapped"
+mapped() { local o; for _ in 1 2 3; do o=$(timeout 5 hyprctl layers 2>/dev/null); grep -q 'namespace:' <<<"$o" && break; sleep 1; done; grep -q "namespace: $ns," <<<"$o"; }
 # A layer can show up in `hyprctl layers` just before waybar gives up on its initial configure; that
 # surface is then dropped and never maps. Only count it as up once it stayed mapped for $settle s
 # without a configure timeout.

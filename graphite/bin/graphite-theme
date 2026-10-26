@@ -84,7 +84,14 @@ reload_desktop() {
   # layer-shell configure under load). Launch it through Hyprland so the bar gets the
   # compositor's environment and session, never the caller's (tty/ssh/rofi): a bar started in
   # the caller's session died with it or ran stacked on a second one. Wait (bounded) for it.
-  hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+  # Under load hyprctl can return without Hyprland ever running the exec (seen in the VM: the bar
+  # was never restarted). Confirm the restart started; retry, and as a last resort start it here.
+  started=
+  for _ in 1 2 3; do
+    timeout 15 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+    for _ in $(seq 20); do pgrep -f 'graphite-bar --restart' >/dev/null && { started=1; break 2; }; sleep 0.5; done
+  done
+  [ -n "$started" ] || setsid -f graphite-bar --restart >/dev/null 2>&1 </dev/null
   sleep 1
   for _ in $(seq 180); do pgrep -f 'graphite-bar --restart' >/dev/null || break; sleep 0.5; done
   makoctl reload 2>/dev/null || true

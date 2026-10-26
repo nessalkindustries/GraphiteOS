@@ -18,6 +18,9 @@ ShellRoot {
     id: root
     readonly property string iconFont: "JetBrainsMono Nerd Font"
 
+    // the launcher (Super+Space): apps, calculator, commands. See Launcher.qml
+    Launcher { id: launcher }
+
     // ---- audio: default sink via PipeWire (bind it so volume/mute are live) ----
     readonly property var sink: Pipewire.defaultAudioSink
     PwObjectTracker { objects: root.sink ? [root.sink] : [] }
@@ -85,7 +88,7 @@ ShellRoot {
                     spacing: 8
                     Glyph {
                         text: "󰣇"; color: Colors.accent; font.pixelSize: 17
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.run("rofi -show drun") }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: launcher.toggle() }
                     }
                     Row {
                         spacing: 5

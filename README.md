@@ -12,7 +12,7 @@ Graphite has two install paths, and both come from one source tree, `graphite/`:
 |---|---|
 | `graphite/install.sh` | Installer entry point. Runs the phases `install/{preflight,packages,system,config,post-install}.sh` |
 | `graphite/bin/` | `graphite` CLI, `graphite-migrate`, `graphite-iso-install`, wallpaper/welcome helpers |
-| `graphite/config/` | Default dotfiles: Hyprland, Quickshell bar (Waybar opt-out), rofi, kitty, mako, MangoHud. This is the only copy in the repo. |
+| `graphite/config/` | Default dotfiles: Hyprland, Quickshell bar and launcher (Super+Space: apps, `=` calculator, `>` commands; Waybar opt-out falls back to rofi), rofi, kitty, mako, MangoHud. This is the only copy in the repo. |
 | `graphite/packages/*.txt` | desktop / graphics / gaming / dev / nvidia package lists. They are used by both the ISO and install.sh. |
 | `graphite/themes/graphite-teal/colors.toml` | Default theme palette. Theme switching comes in phase 2. |
 | `graphite/migrations/<unix-ts>.sh` | Idempotent update scripts, run once per user by `graphite update` |
