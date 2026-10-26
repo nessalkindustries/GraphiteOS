@@ -30,10 +30,14 @@ check "bar (quickshell, default) loaded and mapped" 'barup 90 && pgrep -x qs && 
 check "quickshell bar config loads without QML errors" '[ -z "$(qserr)" ]'
 echo "SMOKE: diag qs errors: $(qserr)"
 barup 1 || echo "SMOKE: diag login bar: $(wbtree) gb=$(pgrep -af graphite-bar | tr '\n' ' ') log: $(grep -a 'graphite-bar\|configure' $wblog 2>/dev/null | tail -12 | tr '\n' '|') cur: $(tail -5 $qslog 2>/dev/null | tr '\n' '|') jr: $(journalctl -b -t graphite-bar --no-pager -o cat 2>/dev/null | tail -8 | tr "\n" "|") load: $(cut -d' ' -f1-3 /proc/loadavg) up: $(cut -d' ' -f1 /proc/uptime)"
-before=$(hyprctl clients 2>/dev/null | grep -c "class: kitty")
-hyprctl dispatch exec kitty >/dev/null 2>&1
-for _ in $(seq 60); do [ "$(hyprctl clients 2>/dev/null | grep -c 'class: kitty')" -gt "$before" ] && break; sleep 2; done
-check "terminal opens via dispatch (Super+Return action)" '[ "$(hyprctl clients | grep -c "class: kitty")" -gt "$before" ]'
+hclients() { local o; for _ in 1 2 3 4 5; do o=$(timeout 10 hyprctl clients 2>/dev/null); [ -n "$o" ] && { echo "$o"; return; }; sleep 2; done; }
+nkitty() { hclients | grep -c "class: kitty"; }
+before=$(pgrep -cx kitty)
+for _ in 1 2 3; do  # a dispatch can be lost when hyprctl gets no answer under TCG load
+  timeout 15 hyprctl dispatch exec kitty >/dev/null 2>&1
+  for _ in $(seq 20); do [ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ] && break 2; sleep 2; done
+done
+check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ]'
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
 # desktop for the screenshots: fastfetch (logo) + a second tiled terminal
