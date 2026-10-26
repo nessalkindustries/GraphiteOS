@@ -60,6 +60,8 @@ case ${1:-open} in
     if [[ $1 != open ]] && pgrep -f 'qs -c graphite-settings' >/dev/null; then pkill -f 'qs -c graphite-settings'; exit 0; fi
     [[ $1 == close ]] && exit 0
     pgrep -f 'qs -c graphite-settings' >/dev/null && exit 0
+    d=$HOME/.config/quickshell/graphite-settings; b=$HOME/.config/quickshell/graphite-bar/Colors.qml
+    [[ -f $d/Colors.qml || ! -f $b ]] || { mkdir -p "$d"; cp "$b" "$d/Colors.qml"; }
     setsid -f qs -c graphite-settings >/dev/null 2>&1 ;;
   init) [[ -f $CONF ]] || write "" "" ;;   # defaults, so hyprland.conf's source line always resolves
   keys) printf '%s\n' scale kb_layout kb_variant sensitivity natural_scroll follow_mouse ;;

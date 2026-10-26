@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Guided first-boot setup (desk-7): theme, wallpaper, privacy, optional profiles,
+# Secure Boot hint. Hyprland runs `graphite-firstboot auto` at every login; it opens the
+# Quickshell window (config graphite-firstboot) until the user finishes or skips it once.
+#   graphite-firstboot [auto|open|close|status|reset]
+#   graphite-firstboot finish            mark done (the window's Finish/Skip buttons)
+#   graphite-firstboot wallpapers        bundled wallpapers, one path per line
+#   graphite-firstboot privacy [get|set KEY on|off]   news, clipboard, recent
+#   graphite-firstboot profiles          NAME=installed|available (gaming, dev, nvidia)
+#   graphite-firstboot profile NAME      install graphite-NAME in a terminal (asks for sudo)
+#   graphite-firstboot secureboot        one-line Secure Boot summary
+set -uo pipefail
+G=$HOME/.config/graphite
+DONE=$G/firstboot-done
+PRIV=$G/privacy
+QS=(qs -c graphite-firstboot)
+running() { pgrep -f 'qs -c graphite-firstboot' >/dev/null; }
+live() { [[ -d /run/archiso ]] || grep -q 'archisobasedir' /proc/cmdline 2>/dev/null; }
+colors() {   # palette comes from graphite-theme render; copy the bar's if this config has none yet
+  local d=$HOME/.config/quickshell/graphite-firstboot b=$HOME/.config/quickshell/graphite-bar/Colors.qml
+  [[ -f $d/Colors.qml || ! -f $b ]] || { mkdir -p "$d"; cp "$b" "$d/Colors.qml"; }
+}
+open_win() { colors; running || setsid -f "${QS[@]}" >/dev/null 2>&1; }
+close_win() { pkill -f 'qs -c graphite-firstboot' 2>/dev/null; true; }
+
+pget() { [[ -f $PRIV/no-$1 ]] && echo off || echo on; }
+pset() {
+  local k=$1 v=$2; mkdir -p "$PRIV"
+  case $k in news|clipboard|recent) ;; *) echo "unknown privacy key: $k (news, clipboard, recent)" >&2; return 1 ;; esac
+  case $v in on) rm -f "$PRIV/no-$k" ;; off) : > "$PRIV/no-$k" ;; *) echo "value must be on or off" >&2; return 1 ;; esac
+  case $k in
+    clipboard)   # cliphist: stop the watcher and wipe the history, or start it again
+      if [[ $v == off ]]; then pkill -f 'wl-paste --watch cliphist' 2>/dev/null; cliphist wipe 2>/dev/null
+      elif ! pgrep -f 'wl-paste --watch cliphist' >/dev/null; then setsid -f wl-paste --watch cliphist store >/dev/null 2>&1; fi ;;
+    recent)      # GTK recently-used files
+      local f=$HOME/.config/gtk-3.0/settings.ini b; b=$([[ $v == on ]] && echo true || echo false)
+      mkdir -p "${f%/*}"; [[ -f $f ]] || printf '[Settings]\n' > "$f"
+      if grep -q '^gtk-recent-files-enabled' "$f"; then sed -i "s/^gtk-recent-files-enabled.*/gtk-recent-files-enabled=$b/" "$f"
+      else sed -i "/^\[Settings\]/a gtk-recent-files-enabled=$b" "$f"; fi
+      [[ $v == off ]] && rm -f "$HOME/.local/share/recently-used.xbel" ;;
+  esac
+  echo "$k=$v"
+}
+
+case ${1:-open} in
+  auto) [[ -f $DONE ]] && exit 0; live && exit 0; open_win ;;
+  open) open_win ;;
+  close) close_win ;;
+  status) [[ -f $DONE ]] && echo "done=yes" || echo "done=no" ;;
+  reset) rm -f "$DONE"; echo "first-boot setup will open at the next login (or: graphite-firstboot open)" ;;
+  finish) mkdir -p "$G"; date -Is > "$DONE"; close_win; echo "done=yes" ;;
+  wallpapers) find /usr/share/backgrounds/graphite -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' \) 2>/dev/null | sort ;;
+  privacy)
+    case ${2:-get} in
+      get) for k in news clipboard recent; do echo "$k=$(pget $k)"; done ;;
+      set) pset "${3:?key}" "${4:?on|off}" ;;
+      *) echo "usage: graphite-firstboot privacy [get|set KEY on|off]" >&2; exit 1 ;;
+    esac ;;
+  profiles) for p in gaming dev nvidia; do pacman -Qq "graphite-$p" >/dev/null 2>&1 && echo "$p=installed" || echo "$p=available"; done ;;
+  profile)
+    p=${2:?usage: graphite-firstboot profile gaming|dev|nvidia}
+    [[ $p =~ ^(gaming|dev|nvidia)$ ]] || { echo "unknown profile: $p" >&2; exit 1; }
+    setsid -f kitty --title "Graphite: install $p profile" sh -c "sudo pacman -S --needed graphite-$p; echo; read -r -p 'Press Enter to close' _" >/dev/null 2>&1 ;;
+  secureboot)
+    s=$(graphite-secureboot status 2>/dev/null)
+    if grep -q 'legacy BIOS' <<<"$s"; then echo "Legacy BIOS boot: Secure Boot is not available."
+    elif grep -q 'secure boot:  enabled' <<<"$s"; then echo "Secure Boot is enabled."
+    else echo "Secure Boot is off. It is optional: 'graphite secureboot plan' explains the steps (docs/secure-boot.md)."; fi ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

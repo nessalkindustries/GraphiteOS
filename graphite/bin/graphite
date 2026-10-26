@@ -24,6 +24,7 @@ Usage: graphite <command> [args]
   splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
   control [status|...]       control center: volume, brightness, Wi-Fi, Bluetooth, power, theme (Super+A)
   settings [get|set K V|...]  Settings app: appearance, display, input, network, about (Super+I)
+  firstboot [open|reset|...]  guided first-boot setup (theme, wallpaper, privacy, profiles, Secure Boot)
   keybinds                    keybinding cheatsheet (also Super+K)
   snapshots                   list Snapper snapshots of /
   rollback N                  make snapshot N the new root (reboot afterwards)
@@ -66,6 +67,7 @@ update() {
     shift
   done
   mkdir -p "$STATE_DIR"
+  [[ -f $HOME/.config/graphite/privacy/no-news ]] && news=0   # first-boot privacy choice
   ((news)) && news_check "$yes"
   # Graphite's own code arrives as the graphite-config package from [graphite];
   # there is no separate code channel: pacman is the only updater.
@@ -250,6 +252,7 @@ case $cmd in
   keybinds) graphite-keybinds "$@" ;;
   control) graphite-control "$@" ;;
   settings) graphite-settings "$@" ;;
+  firstboot|welcome) graphite-firstboot "$@" ;;
   snapshots) snapshots ;;
   rollback) rollback "$@" ;;
   splash) splash "$@" ;;
