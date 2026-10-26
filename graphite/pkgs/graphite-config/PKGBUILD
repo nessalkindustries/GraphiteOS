@@ -3,7 +3,7 @@
 # Never overwrites files owned by other packages (rule: overlay, not replacement).
 pkgname=graphite-config
 pkgver=0.3.0
-pkgrel=17
+pkgrel=18
 pkgdesc="Graphite defaults: CLI, themes, user config skeleton, system drop-ins"
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"
@@ -19,7 +19,7 @@ package() {
   local src=${GRAPHITE_SRC:-$startdir/../..}
   local share="$pkgdir/usr/share/graphite"
   install -d "$share" "$pkgdir/usr/bin"
-  cp -r "$src"/{bin,migrations,themes,templates,install} "$share/"
+  cp -r "$src"/{bin,migrations,themes,templates,install,store} "$share/"
   install -m644 "$src/VERSION" "$share/VERSION"
   install -m755 "$src/install.sh" "$share/install.sh"
   local f

@@ -1,4 +1,4 @@
-// Graphite Settings (desk-6): appearance, display, input, network, about; theme store (eco-2).
+// Graphite Settings (desk-6): appearance, display, input, network, about; theme store (eco-2); apps (eco-3).
 // Run with `graphite-settings` (Super+I). Every read and write goes through the
 // graphite-settings backend, so this window and `graphite settings` always agree.
 // Window class/title "Graphite Settings"; IPC target "settings" (show/quit/page).
@@ -14,6 +14,8 @@ ShellRoot {
     property var themes: []
     property var nets: []
     property var store: []
+    property var apps: []
+    property string appQuery: ""
     property string page: "appearance"
     property string msg: ""
 
@@ -40,10 +42,23 @@ ShellRoot {
     Process { id: storeP; command: ["graphite-theme", "browse", "--tsv"]
         stdout: StdioCollector { onStreamFinished: root.store = this.text.split("\n").filter(l => l.length > 0).map(l => l.split("\t")) } }
     function openStore() { storeP.running = true; themeP.running = true; }
+    Process { id: appsP
+        stdout: StdioCollector { onStreamFinished: root.apps = this.text.split("\n").filter(l => l.length > 0).map(l => l.split("\t")) } }
+    function openApps(q) {
+        root.appQuery = q || "";
+        appsP.command = root.appQuery.length >= 2 ? ["graphite-apps", "search", root.appQuery, "--tsv"] : ["graphite-apps", "list", "--tsv"];
+        appsP.running = true;
+    }
+    function appAction(verb, id) {
+        runP.command = ["kitty", "--title", "Graphite: " + verb + " " + id, "sh", "-c", "graphite-apps " + verb + " \"$0\"; echo; read -r -p 'Press Enter to close' _", id];
+        runP.running = true; root.msg = "Opening a terminal…";
+    }
 
     IpcHandler {
         target: "settings"
-        function page(name: string): void { root.page = name; if (name === "store") root.openStore(); }
+        function page(name: string): void { root.page = name; if (name === "store") root.openStore(); if (name === "apps") root.openApps(""); }
+        function search(q: string): void { root.page = "apps"; root.openApps(q); }
+        function results(): int { return root.apps.length; }
         function current(): string { return root.page; }
         function quit(): void { Qt.quit(); }
     }
@@ -83,7 +98,7 @@ ShellRoot {
                     anchors { fill: parent; margins: 12 } spacing: 4
                     Text { text: "Settings"; color: Colors.muted; font.pixelSize: 12; Layout.bottomMargin: 6 }
                     Repeater {
-                        model: [["appearance", "Appearance"], ["display", "Display"], ["input", "Input"], ["network", "Network"], ["store", "Theme store"], ["about", "About"]]
+                        model: [["appearance", "Appearance"], ["display", "Display"], ["input", "Input"], ["network", "Network"], ["store", "Theme store"], ["apps", "Apps"], ["about", "About"]]
                         Rectangle {
                             required property var modelData
                             Layout.fillWidth: true; implicitHeight: 36; radius: 8
@@ -92,7 +107,7 @@ ShellRoot {
                                    text: modelData[1]; font.pixelSize: 14
                                    color: root.page === modelData[0] ? Colors.accent : Colors.foreground }
                             MouseArea { id: nm; anchors.fill: parent; hoverEnabled: true
-                                onClicked: { root.page = modelData[0]; if (modelData[0] === "network") netP.running = true; if (modelData[0] === "store") root.openStore(); } }
+                                onClicked: { root.page = modelData[0]; if (modelData[0] === "network") netP.running = true; if (modelData[0] === "store") root.openStore(); if (modelData[0] === "apps") root.openApps(""); } }
                         }
                     }
                     Item { Layout.fillHeight: true }
@@ -158,6 +173,27 @@ ShellRoot {
                               onClicked: { runP.command = ["kitty", "--title", "Graphite: install theme", "sh", "-c", "graphite-theme install " + modelData[0] + " --set; echo; read -r -p 'Press Enter to close' _"]; runP.running = true; root.msg = "Opening a terminal…"; } }
                         Btn { visible: modelData[2] === "installed"; label: root.st.theme === modelData[0] ? "In use" : "Use"; on: root.st.theme === modelData[0]
                               onClicked: root.set("theme", modelData[0]) } } }
+
+                // Apps: curated list, search across the Arch repos and Flathub (when enabled)
+                Head { text: "Apps"; visible: root.page === "apps" }
+                RowLayout { visible: root.page === "apps"; Layout.fillWidth: true; spacing: 8
+                    Rectangle { Layout.fillWidth: true; implicitHeight: 34; radius: 8; color: Colors.surface; border.color: Colors.overlay; border.width: 1
+                        TextInput { id: q; anchors { fill: parent; leftMargin: 12; rightMargin: 12 } verticalAlignment: TextInput.AlignVCenter
+                            color: Colors.foreground; font.pixelSize: 14; clip: true; onAccepted: root.openApps(text)
+                            Text { visible: !q.text.length; anchors.verticalCenter: parent.verticalCenter; text: "Search apps (Enter)"; color: Colors.muted; font.pixelSize: 14 } } }
+                    Btn { label: "Featured"; onClicked: { q.text = ""; root.openApps(""); } }
+                    Btn { label: "Enable Flathub"; onClicked: root.appAction("flathub", "") } }
+                Text { visible: root.page === "apps" && root.apps.length === 0; text: appsP.running ? "Loading…" : "No apps found"; color: Colors.muted; font.pixelSize: 13 }
+                Flickable { visible: root.page === "apps"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                    contentHeight: appCol.implicitHeight
+                    ColumnLayout { id: appCol; width: parent.width; spacing: 6
+                        Repeater { model: root.apps
+                            RowLayout { required property var modelData; Layout.fillWidth: true; spacing: 12
+                                ColumnLayout { Layout.fillWidth: true; spacing: 1
+                                    Text { text: modelData[3] + "  ·  " + modelData[2] + (modelData[1] === "flatpak" ? "  ·  Flathub" : ""); color: Colors.foreground; font.pixelSize: 14 }
+                                    Text { text: modelData[4] || ""; color: Colors.muted; font.pixelSize: 12; elide: Text.ElideRight; Layout.fillWidth: true } }
+                                Btn { label: modelData[5] === "installed" ? "Remove" : "Install"; on: modelData[5] !== "installed"
+                                      onClicked: root.appAction(modelData[5] === "installed" ? "remove" : "install", modelData[0]) } } } } }
 
                 // About
                 Head { text: "About"; visible: root.page === "about" }

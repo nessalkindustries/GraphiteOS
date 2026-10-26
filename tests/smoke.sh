@@ -253,6 +253,9 @@ echo "SMOKE: SHOT settings-about"; sleep 3
 timeout 10 qs ipc -c graphite-settings call settings page store >/dev/null 2>&1; sleep 5
 check "settings: theme store page opens" '[ "$(timeout 10 qs ipc -c graphite-settings call settings current 2>/dev/null)" = store ]'
 echo "SMOKE: SHOT settings-store"; sleep 3
+timeout 10 qs ipc -c graphite-settings call settings search vlc >/dev/null 2>&1
+check "settings: apps page searches the repos" '(for _ in $(seq 20); do [ "$(timeout 10 qs ipc -c graphite-settings call settings results 2>/dev/null)" -gt 0 ] 2>/dev/null && exit 0; sleep 3; done; exit 1)'
+echo "SMOKE: SHOT settings-apps"; sleep 3
 timeout 20 graphite-settings close >/dev/null 2>&1
 for _ in $(seq 10); do ! timeout 10 hyprctl clients | grep -q "title: Graphite Settings" && break; sleep 3; done
 check "settings window closes" '! timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
@@ -300,4 +303,8 @@ check "sync: import refuses a folder without settings" '! graphite sync import "
 check "theme store: browse lists the store themes" '[ "$(timeout 30 graphite theme browse --tsv | grep -cE "^graphite-(gruvbox|rosepine|solarized)[[:space:]].+[[:space:]](installed|available)$")" = 3 ]'
 check "theme store: store themes are not installed by default" '! graphite theme list | grep -q gruvbox'
 check "theme store: rejects a bad name" '! graphite theme install ../etc 2>/dev/null && ! graphite theme install graphite-nosuch 2>/dev/null'
+# app store (eco-3): curated list + pacman search, no installs in the test
+check "apps: curated list with states" '[ "$(graphite apps list --tsv | grep -cE "	(pacman|flatpak)	.*	(installed|available)$")" -ge 20 ]'
+check "apps: search finds a repo package" 'timeout 60 graphite apps search vlc --tsv | grep -q "^vlc	pacman	"'
+check "apps: rejects a bad id" '! graphite apps install "a;b" 2>/dev/null && ! graphite apps install no-such-package-xyz 2>/dev/null'
 echo "SMOKE: DONE fails=$fails"
