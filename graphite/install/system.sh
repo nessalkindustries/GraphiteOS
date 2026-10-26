@@ -12,7 +12,7 @@ if ((! LIVE)); then
   enable graphite-firewall.service power-profiles-daemon.service bluetooth.service
   enable fstrim.timer paccache.timer reflector.timer fwupd-refresh.timer
   [[ $PROFILE == full ]] && enable docker.service
-  usermod -aG gamemode,docker "$TARGET_USER" 2>/dev/null || true
+  for g in gamemode docker realtime; do usermod -aG "$g" "$TARGET_USER" 2>/dev/null || true; done   # one call per group: a missing group (docker on the desktop profile) must not skip the rest
 
   # Snapper (root config) for the Graphite Btrfs layout: / is subvol @ and
   # /.snapshots is the separately mounted @snapshots subvolume.

@@ -31,6 +31,9 @@ pipewire-pulse
 pipewire-alsa
 pipewire-jack
 wireplumber
+# realtime audio (game-2): rtkit for PipeWire threads, @realtime limits for JACK apps
+rtkit
+realtime-privileges
 polkit-kde-agent
 qt5-wayland
 qt6-wayland

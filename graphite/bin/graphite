@@ -26,6 +26,7 @@ Usage: graphite <command> [args]
   settings [get|set K V|...]  Settings app: appearance, display, input, network, about (Super+I)
   firstboot [open|reset|...]  guided first-boot setup (theme, wallpaper, privacy, profiles, Secure Boot)
   gpu status|plan|setup       detect Intel/AMD/NVIDIA GPUs and install the matching driver stack
+  audio status|default|lowlatency [Q]  PipeWire latency presets (rtkit realtime)
   keybinds                    keybinding cheatsheet (also Super+K)
   snapshots                   list Snapper snapshots of /
   rollback N                  make snapshot N the new root (reboot afterwards)
@@ -255,6 +256,7 @@ case $cmd in
   settings) graphite-settings "$@" ;;
   firstboot|welcome) graphite-firstboot "$@" ;;
   gpu) graphite-gpu "$@" ;;
+  audio) graphite-audio "$@" ;;
   snapshots) snapshots ;;
   rollback) rollback "$@" ;;
   splash) splash "$@" ;;

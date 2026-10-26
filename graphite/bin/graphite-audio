@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# PipeWire latency presets (game-2). Writes a per-user drop-in and restarts the user's
+# PipeWire services; rtkit gives the audio threads realtime priority without extra groups.
+#   graphite audio status            preset, quantum/rate in effect, rtkit, realtime limits
+#   graphite audio default           PipeWire defaults (quantum 1024 @ 48 kHz, ~21 ms)
+#   graphite audio lowlatency [Q]    quantum Q (default 64, ~1.3 ms @ 48 kHz; 32..512) for
+#                                    games, music production and voice; costs some CPU
+set -uo pipefail
+D=$HOME/.config/pipewire/pipewire.conf.d
+PD=$HOME/.config/pipewire/pipewire-pulse.conf.d
+F=$D/90-graphite-latency.conf
+PF=$PD/90-graphite-latency.conf
+
+restart() { systemctl --user restart pipewire.service pipewire-pulse.service wireplumber.service 2>/dev/null || true; }
+meta() { timeout 10 pw-metadata -n settings 0 "$1" 2>/dev/null | sed -n "s/.*value:'\([^']*\)'.*/\1/p" | head -1; }
+
+case ${1:-status} in
+  status)
+    if [[ -f $F ]]; then echo "preset:   lowlatency (quantum $(sed -n 's/.*default.clock.quantum *= *\([0-9]*\).*/\1/p' "$F"))"; else echo "preset:   default"; fi
+    echo "quantum:  $(meta clock.quantum || true) (min $(meta clock.min-quantum || true), forced $(meta clock.force-quantum || true))"
+    echo "rate:     $(meta clock.rate || true)"
+    echo "rtkit:    $(systemctl is-active rtkit-daemon.service 2>/dev/null || echo inactive) (starts on demand)"
+    if id -nG | grep -qw realtime; then echo "realtime: in group realtime (rtprio limit $(ulimit -r))"
+    else echo "realtime: not in group realtime (JACK apps: sudo usermod -aG realtime $USER, then log in again)"; fi ;;
+  default)
+    rm -f "$F" "$PF"; restart; echo "audio preset: default" ;;
+  lowlatency|low-latency)
+    q=${2:-64}
+    [[ $q =~ ^(32|48|64|96|128|256|512)$ ]] || { echo "quantum must be one of 32 48 64 96 128 256 512" >&2; exit 1; }
+    mkdir -p "$D" "$PD"
+    cat > "$F" <<CONF
+# graphite audio lowlatency $q (generated; 'graphite audio default' removes it)
+context.properties = {
+    default.clock.rate        = 48000
+    default.clock.allowed-rates = [ 44100 48000 96000 ]
+    default.clock.quantum     = $q
+    default.clock.min-quantum = $(( q < 64 ? q : 32 ))
+    default.clock.max-quantum = 1024
+}
+CONF
+    cat > "$PF" <<CONF
+# graphite audio lowlatency $q (generated)
+pulse.properties = {
+    pulse.min.req     = $q/48000
+    pulse.default.req = $q/48000
+    pulse.min.quantum = $q/48000
+}
+CONF
+    restart; echo "audio preset: lowlatency (quantum $q @ 48 kHz, $(awk "BEGIN{printf \"%.1f\", $q/48}") ms)" ;;
+  -h|--help|help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1 ;;
+esac
