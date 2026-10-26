@@ -20,6 +20,16 @@ if [[ -f $skel/$d/shell.qml && -f $f ]] && ! cmp -s "$skel/$d/shell.qml" "$f"; t
       echo "  kept your edited shell.qml; add 'Notifications { id: notifications }' (see shell.qml.graphite-new)" ;;
   esac
 fi
+# Launcher.qml: the launcher window is now box-sized (it was a full-screen overlay that
+# slowed the compositor); replace an unedited desk-2 launcher, keep edited ones
+f=$HOME/$d/Launcher.qml
+if [[ -f $skel/$d/Launcher.qml && -f $f ]] && ! cmp -s "$skel/$d/Launcher.qml" "$f"; then
+  if [[ $(sha256sum < "$f" | cut -c1-64) == 228723dc81d1b8737cdb82c51d35e4a7400868b4f08f4cdadccdb3116c32f4eb ]]; then
+    cp -f "$f" "$f.bak"; install -m644 "$skel/$d/Launcher.qml" "$f"
+  else
+    install -m644 "$skel/$d/Launcher.qml" "$f.graphite-new"
+  fi
+fi
 # D-Bus activation starts the Graphite daemon (Quickshell bar, or mako with Waybar), not mako
 s=.local/share/dbus-1/services/fr.emersion.mako.service
 [[ -f $skel/$s && ! -e $HOME/$s ]] && install -Dm644 "$skel/$s" "$HOME/$s"

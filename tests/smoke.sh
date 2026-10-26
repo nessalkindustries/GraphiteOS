@@ -93,6 +93,7 @@ for a in 1 2 3; do lopen && break
 timeout 5 qs ipc -c graphite-bar call launcher query "" >/dev/null 2>&1   # show the app list in the shot
 echo "SMOKE: SHOT launcher"; sleep 8
 check "launcher opens (layer graphite-launcher mapped)" 'lmapped'
+check "launcher opened on the first try (attempts: $a)" '[ "$a" = 1 ]'
 lmapped || echo "SMOKE: diag launcher open: isOpen=$(timeout 5 qs ipc -c graphite-bar call launcher isOpen 2>&1) gl.log=$(tr '\n' '|' </tmp/gl.log 2>/dev/null | cut -c1-200) layers: $(timeout 10 hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | tr '\n' ' ') qslog: $(grep -a -i 'launcher\|error' "$qslog" 2>/dev/null | tail -5 | tr '\n' '|' | cut -c1-400)"
 timeout 25 graphite-launcher close >/dev/null 2>&1; for _ in $(seq 10); do lgone && break; sleep 3; done
 check "launcher closes" 'lgone'

@@ -8,6 +8,7 @@
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import Quickshell.Widgets
 import QtQuick
 import QtQuick.Layouts
@@ -21,7 +22,12 @@ PanelWindow {
 
     visible: false
     color: "transparent"
-    anchors { top: true; bottom: true; left: true; right: true }
+    // only the box's size, not a full-screen overlay: a full-screen transparent layer made
+    // every redraw (the cursor blinks) recomposite the whole screen, which starved the
+    // compositor under software rendering and could leave the launcher slow to appear
+    anchors.top: true
+    margins.top: Math.round((screen ? screen.height : 800) * 0.2)
+    implicitWidth: 560; implicitHeight: 470
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "graphite-launcher"
@@ -157,14 +163,14 @@ PanelWindow {
         }
     }
 
-    // click outside the box closes
-    MouseArea { anchors.fill: parent; onClicked: launcher.close() }
+    // click outside the launcher closes it
+    HyprlandFocusGrab { windows: [launcher]; active: launcher.visible; onCleared: launcher.close() }
 
     Rectangle {
         id: box
         width: 560; height: Math.min(470, 64 + list.contentHeight)
         anchors.horizontalCenter: parent.horizontalCenter
-        y: parent.height * 0.2
+        y: 0
         radius: 16; color: Colors.background; border.color: Colors.accent; border.width: 2
         MouseArea { anchors.fill: parent }   // swallow clicks inside the box
 
