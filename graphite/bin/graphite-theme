@@ -94,7 +94,9 @@ reload_desktop() {
   [ -n "$started" ] || setsid -f graphite-bar --restart >/dev/null 2>&1 </dev/null
   sleep 1
   for _ in $(seq 180); do pgrep -f 'graphite-bar --restart' >/dev/null || break; sleep 0.5; done
-  makoctl reload 2>/dev/null || true
+  # only a running mako: makoctl on the bus would D-Bus-activate a notification daemon while the
+  # Quickshell bar (the daemon by default) is restarting
+  pgrep -x mako >/dev/null && { makoctl reload 2>/dev/null || true; }
   pkill -SIGUSR1 -x kitty 2>/dev/null || true       # kitty reloads its config
   # new wallpaper: restart the wallpaper daemon detached from this shell
   pkill -x hyprpaper 2>/dev/null || true; pkill -x swaybg 2>/dev/null || true
