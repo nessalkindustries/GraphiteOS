@@ -23,6 +23,8 @@ bluez
 bluez-utils
 # python-gobject: powerprofilesctl (control center power profile) needs it
 python-gobject
+# python-pillow: graphite-palette (theme from-wallpaper)
+python-pillow
 pavucontrol
 pipewire
 pipewire-pulse

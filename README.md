@@ -14,7 +14,7 @@ Graphite has two install paths, and both come from one source tree, `graphite/`:
 | `graphite/bin/` | `graphite` CLI, `graphite-migrate`, `graphite-iso-install`, wallpaper/welcome helpers |
 | `graphite/config/` | Default dotfiles: Hyprland, Quickshell bar, launcher (Super+Space: apps, `=` calculator, `>` commands; Waybar opt-out falls back to rofi) and notifications (popups, center on Super+N, do-not-disturb on Super+Shift+N or `graphite-notify dnd`; mako with the Waybar opt-out), control center (Super+A or a click on the bar status group: volume, brightness, Wi-Fi, Bluetooth, power profile, light/dark theme; `graphite-control`), rofi, kitty, MangoHud. This is the only copy in the repo. |
 | `graphite/packages/*.txt` | desktop / graphics / gaming / dev / nvidia package lists. They are used by both the ISO and install.sh. |
-| `graphite/themes/graphite-teal/colors.toml` | Default theme palette. Theme switching comes in phase 2. |
+| `graphite/themes/*/colors.toml` | Theme palettes (`graphite theme set NAME`, Super+T). `graphite theme from-wallpaper IMAGE [--light]` extracts a palette from any image offline (`graphite-palette`, Pillow) into the user theme `wallpaper` and applies it. |
 | `graphite/migrations/<unix-ts>.sh` | Idempotent update scripts, run once per user by `graphite update` |
 | `graphite/assets/` | Wallpaper, SDDM theme, os-release |
 | `profiledef.sh`, `packages.x86_64`, `airootfs/`, `grub/`, `syslinux/`, `efiboot/` | archiso (releng) profile. `packages.x86_64` holds only the releng base. |

@@ -63,6 +63,14 @@ echo "SMOKE: diag waybar after nord: $(wbtree)"
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 nord=$(sed -n 's/^accent *= *"\(#[0-9a-fA-F]*\)".*/\1/p' /usr/share/graphite/themes/graphite-nord/colors.toml)
 check "kitty colours follow theme (nord accent $nord)" 'grep -qi "$nord" ~/.config/graphite/current/kitty.conf'
+# desk-5: wallpaper-derived theme (offline palette extraction), then back to teal below
+command -v graphite-palette >/dev/null && python3 -c 'import PIL' 2>/dev/null || echo "SMOKE: diag palette deps missing"
+timeout 400 graphite theme from-wallpaper /usr/share/backgrounds/graphite/graphite-violet.png >/dev/null 2>&1 || echo "SMOKE: diag from-wallpaper rc=$?"
+wpacc=$(sed -n 's/^accent *= *"\(#[0-9a-fA-F]*\)".*/\1/p' ~/.config/graphite/themes/wallpaper/colors.toml 2>/dev/null)
+echo "SMOKE: diag from-wallpaper accent=$wpacc theme=$(graphite-theme current)"
+check "theme from-wallpaper writes a palette and applies it" '[ "$(graphite-theme current)" = wallpaper ] && [ -n "$wpacc" ] && grep -qi "$wpacc" ~/.config/graphite/current/kitty.conf'
+check "from-wallpaper theme uses the wallpaper" 'grep -q "themes/wallpaper/wallpaper.png" ~/.config/graphite/current/wallpaper'
+barup 60; echo "SMOKE: SHOT theme-from-wallpaper"; sleep 10
 echo "SMOKE: diag t=$(date +%T) teal switch start"
 timeout 180 graphite-theme set graphite-teal >/dev/null 2>&1 || echo "SMOKE: diag theme teal rc=$?"
 echo "SMOKE: diag t=$(date +%T) teal switch returned"

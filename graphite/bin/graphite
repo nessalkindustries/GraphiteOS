@@ -19,7 +19,8 @@ Usage: graphite <command> [args]
   repo                        [graphite] repo status: servers, signature policy, trusted keys
   migrate [--pending]         run (or list) pending migrations for this user
   bar [status|quickshell|waybar]  which bar runs: Quickshell (default) or Waybar (opt-out)
-  theme list|current|set N|pick   themes (colors.toml -> generated configs; Super+T)
+  theme list|current|set N|pick|from-wallpaper IMG [--light]
+                             themes (colors.toml -> generated configs; Super+T)
   splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
   control [status|...]       control center: volume, brightness, Wi-Fi, Bluetooth, power, theme (Super+A)
   keybinds                    keybinding cheatsheet (also Super+K)

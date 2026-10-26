@@ -3,7 +3,7 @@
 # `key = "value"` pairs). Applying renders $GRAPHITE_PATH/templates/*.tpl into
 # ~/.config/graphite/current/ ({{key}} -> value, {{key.hex}} -> value without '#').
 # mako has no include support, so ~/.config/mako/config is owned by the theme.
-# Usage: graphite-theme list | current | set NAME | pick | apply
+# Usage: graphite-theme list | current | set NAME | pick | apply | from-wallpaper IMAGE [--light]
 set -euo pipefail
 GRAPHITE_PATH=${GRAPHITE_PATH:-/usr/share/graphite}
 USER_THEMES="$HOME/.config/graphite/themes"   # user themes override shipped ones
@@ -126,5 +126,17 @@ case ${1:-current} in
              done | rofi -dmenu -i -p "Theme" -display-columns 2 -display-column-separator '\t' \
                     -theme-str 'window { width: 420px; }') || exit 0
     exec "$0" set "${choice%%$'\t'*}" ;;
-  *) echo "usage: graphite-theme list|current|set NAME|pick|apply" >&2; exit 1 ;;
+  from-wallpaper)
+    # desk-5: extract a palette from IMAGE offline into the user theme "wallpaper", then apply it
+    img=${2:?usage: graphite-theme from-wallpaper IMAGE [--light]}
+    [[ -f $img ]] || { echo "no such image: $img" >&2; exit 1; }
+    mode=dark; [[ ${3:-} == --light ]] && mode=light
+    d="$USER_THEMES/wallpaper"; mkdir -p "$d"
+    ext=${img##*.}; ext=${ext,,}; [[ $ext =~ ^(png|jpg|jpeg|webp)$ ]] || ext=png
+    tmp="$d/.wallpaper.$ext"; cp -f "$img" "$tmp"
+    rm -f "$d"/wallpaper.*; mv -f "$tmp" "$d/wallpaper.$ext"
+    graphite-palette "$d/wallpaper.$ext" --mode "$mode" --name "From wallpaper ($(basename "$img"))" \
+      --wallpaper "wallpaper.$ext" > "$d/colors.toml.new" && mv -f "$d/colors.toml.new" "$d/colors.toml"
+    exec "$0" set wallpaper ;;
+  *) echo "usage: graphite-theme list|current|set NAME|pick|apply|from-wallpaper IMAGE [--light]" >&2; exit 1 ;;
 esac
