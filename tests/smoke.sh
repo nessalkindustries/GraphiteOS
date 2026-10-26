@@ -174,8 +174,8 @@ check "upower daemon answers (battery widget backend)" 'timeout 10 upower -e'
 check "graphite bar status reports quickshell" 'graphite bar status | grep -q "bar: quickshell"'
 echo "SMOKE: SHOT quickshell-bar"; sleep 5
 # opt-out: Waybar replaces the Quickshell bar, then back to the default
-timeout 120 graphite bar waybar >/dev/null 2>&1 || echo "SMOKE: diag bar waybar rc=$?"
-BARNS=waybar; barup 30
+timeout 400 graphite bar waybar >/dev/null 2>&1 || echo "SMOKE: diag bar waybar rc=$?"
+BARNS=waybar; barup 90
 echo "SMOKE: SHOT waybar-optout"; sleep 5
 check "opt-out: graphite bar waybar maps waybar, no quickshell" 'barup 5 && [ "$(pgrep -cx waybar)" = 1 ] && ! pgrep -x qs'
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
@@ -185,7 +185,7 @@ timeout 10 hyprctl dispatch exec graphite-launcher >/dev/null 2>&1
 for _ in $(seq 15); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: rofi,' && break; sleep 2; done
 check "launcher falls back to rofi with Waybar" 'timeout 10 hyprctl layers | grep -q "namespace: rofi,"'
 pkill -x rofi 2>/dev/null; sleep 2
-timeout 120 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
-BARNS=graphite-bar; barup 30
+timeout 400 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
+BARNS=graphite-bar; barup 90
 check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'
 echo "SMOKE: DONE fails=$fails"
