@@ -21,6 +21,7 @@ Usage: graphite <command> [args]
   bar [status|quickshell|waybar]  which bar runs: Quickshell (default) or Waybar (opt-out)
   theme list|current|set N|pick   themes (colors.toml -> generated configs; Super+T)
   splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
+  control [status|...]       control center: volume, brightness, Wi-Fi, Bluetooth, power, theme (Super+A)
   keybinds                    keybinding cheatsheet (also Super+K)
   snapshots                   list Snapper snapshots of /
   rollback N                  make snapshot N the new root (reboot afterwards)
@@ -237,6 +238,7 @@ case $cmd in
   bar) bar "$@" ;;
   theme) graphite-theme "$@" ;;
   keybinds) graphite-keybinds "$@" ;;
+  control) graphite-control "$@" ;;
   snapshots) snapshots ;;
   rollback) rollback "$@" ;;
   splash) splash "$@" ;;

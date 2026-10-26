@@ -9,7 +9,7 @@ if ((! LIVE)); then
   # exactly the alias link systemctl would create
   systemctl enable sddm.service >/dev/null 2>&1 \
     || ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
-  enable graphite-firewall.service power-profiles-daemon.service
+  enable graphite-firewall.service power-profiles-daemon.service bluetooth.service
   enable fstrim.timer paccache.timer reflector.timer fwupd-refresh.timer
   [[ $PROFILE == full ]] && enable docker.service
   usermod -aG gamemode,docker "$TARGET_USER" 2>/dev/null || true

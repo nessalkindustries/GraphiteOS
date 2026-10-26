@@ -1,0 +1,79 @@
+#!/bin/bash
+# Graphite control center: quick settings in the Quickshell bar (Super+A, or click the status
+# group in the bar). This script is the backend the panel (ControlCenter.qml) uses, and works
+# on its own too:
+#   graphite-control [toggle|open|close]   the panel (Quickshell bar only)
+#   graphite-control status                key=value: volume muted brightness wifi bluetooth profile theme
+#   graphite-control volume N|+N|-N|mute   default output, percent (0-150)
+#   graphite-control brightness N|+N|-N    backlight percent (brightnessctl; "none" without one)
+#   graphite-control wifi on|off|toggle    Wi-Fi radio (NetworkManager)
+#   graphite-control bluetooth on|off|toggle  Bluetooth adapter (bluez; "none" without one)
+#   graphite-control profile [NAME|next]   power profile (power-profiles-daemon)
+#   graphite-control theme-toggle          switch between graphite-light and your last dark theme
+set -u
+state=${XDG_STATE_HOME:-$HOME/.local/state}/graphite
+ipc() { timeout 20 qs ipc -c graphite-bar call control "$@" 2>/dev/null; }
+qsup() { b=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar" 2>/dev/null); [[ $b != waybar ]] && pgrep -x qs >/dev/null; }
+onoff() { case $1 in on|off) echo "$1" ;; toggle) [[ $2 == on ]] && echo off || echo on ;; *) return 1 ;; esac; }
+
+volume() { local v; v=$(timeout 5 wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null) || { echo none; return; }
+  awk '{printf "%d\n", $2*100+0.5}' <<<"$v"; }
+muted() { timeout 5 wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | grep -q MUTED && echo yes || echo no; }
+bright() { local d; d=$(brightnessctl -l -c backlight -m 2>/dev/null | head -1)
+  [[ -n $d ]] || { echo none; return; }; IFS=, read -r _ _ _ p _ <<<"$d"; echo "${p%\%}"; }
+wifi() { [[ $(timeout 5 nmcli radio wifi 2>/dev/null) == enabled ]] && echo on || echo off; }
+bt() { timeout 5 bluetoothctl list 2>/dev/null | grep -q '^Controller' || { echo none; return; }
+  timeout 5 bluetoothctl show 2>/dev/null | grep -q 'Powered: yes' && echo on || echo off; }
+profile() { timeout 5 powerprofilesctl get 2>/dev/null || echo none; }
+theme() { graphite-theme current 2>/dev/null || echo unknown; }
+
+case ${1:-toggle} in
+  toggle|open|close)
+    qsup || { echo "graphite-control: the control center needs the Quickshell bar (graphite bar quickshell)" >&2; exit 1; }
+    ipc "${1:-toggle}" ;;
+  status)
+    echo "volume=$(volume)"; echo "muted=$(muted)"; echo "brightness=$(bright)"
+    echo "wifi=$(wifi)"; echo "bluetooth=$(bt)"; echo "profile=$(profile)"; echo "theme=$(theme)" ;;
+  volume)
+    a=${2:?usage: graphite-control volume N|+N|-N|mute}
+    case $a in
+      mute) wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle ;;
+      +[0-9]*) wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ "${a#+}%+" ;;
+      -[0-9]*) wpctl set-volume @DEFAULT_AUDIO_SINK@ "${a#-}%-" ;;
+      [0-9]*) ((a > 150)) && a=150; wpctl set-volume @DEFAULT_AUDIO_SINK@ "$a%" ;;
+      *) echo "usage: graphite-control volume N|+N|-N|mute" >&2; exit 1 ;;
+    esac; volume ;;
+  brightness)
+    a=${2:?usage: graphite-control brightness N|+N|-N}
+    [[ $(bright) == none ]] && { echo none; exit 0; }
+    case $a in +[0-9]*) brightnessctl -q -c backlight set "${a#+}%+" ;; -[0-9]*) brightnessctl -q -c backlight set "${a#-}%-" ;;
+      [0-9]*) ((a < 1)) && a=1; brightnessctl -q -c backlight set "$a%" ;;
+      *) echo "usage: graphite-control brightness N|+N|-N" >&2; exit 1 ;; esac
+    bright ;;
+  wifi)
+    w=$(onoff "${2:-toggle}" "$(wifi)") || { echo "usage: graphite-control wifi on|off|toggle" >&2; exit 1; }
+    timeout 10 nmcli radio wifi "$w" && wifi ;;
+  bluetooth|bt)
+    cur=$(bt); [[ $cur == none ]] && { echo none; exit 0; }
+    w=$(onoff "${2:-toggle}" "$cur") || { echo "usage: graphite-control bluetooth on|off|toggle" >&2; exit 1; }
+    timeout 10 bluetoothctl power "$w" >/dev/null; bt ;;
+  profile)
+    cur=$(profile); [[ $cur == none ]] && { echo none; exit 0; }
+    want=${2:-}
+    if [[ -z $want ]]; then echo "$cur"; exit 0; fi
+    if [[ $want == next ]]; then
+      mapfile -t all < <(powerprofilesctl list 2>/dev/null | sed -n 's/^[* ] *\([a-z-]*\):$/\1/p')
+      for i in "${!all[@]}"; do [[ ${all[i]} == "$cur" ]] && want=${all[(i + 1) % ${#all[@]}]}; done
+    fi
+    timeout 10 powerprofilesctl set "$want" && profile ;;
+  theme-toggle)
+    cur=$(theme); mkdir -p "$state"
+    if [[ $cur == graphite-light ]]; then
+      dark=$(cat "$state/dark-theme" 2>/dev/null); [[ -n $dark ]] || dark=graphite-teal
+      graphite-theme set "$dark" >/dev/null || exit 1
+    else
+      echo "$cur" >"$state/dark-theme"; graphite-theme set graphite-light >/dev/null || exit 1
+    fi
+    theme ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1 ;;
+esac
