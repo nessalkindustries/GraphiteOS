@@ -41,5 +41,5 @@ case ${1:-center} in
     if [[ $(bar) == waybar ]]; then exec mako; fi
     exec graphite-bar ;;
   -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) echo "usage: graphite-notify [center|dnd [on|off|toggle]|count|list|clear]" >&2; exit 1 ;;
+  *) echo "usage: graphite-notify [center|dnd [on|off|toggle]|count|popups|list|clear]" >&2; exit 1 ;;
 esac
