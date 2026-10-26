@@ -83,8 +83,13 @@ check "launcher finds apps (kitty)" '[ "$(lq kitty)" = "app: kitty" ]'
 check "launcher commands (>lock)" '[ "$(lq ">lock")" = "cmd: Lock screen" ]'
 check "launcher runs shell commands (>echo hi)" '[ "$(lq ">echo hi")" = "cmd: Run: echo hi" ]'
 check "launcher lists themes" '[ "$(lq "theme: nord")" = "cmd: Theme: graphite-nord" ]'
-timeout 10 hyprctl dispatch exec "graphite-launcher open >/tmp/gl.log 2>&1" >/dev/null 2>&1
-for _ in $(seq 40); do lmapped && break; sleep 3; done   # first open is slow under TCG
+# under TCG a dispatch (or the first map) can be lost: retry the open up to 3 times, and
+# require the layer to stay mapped across two reads
+lopen() { timeout 10 hyprctl dispatch exec "graphite-launcher open >/tmp/gl.log 2>&1" >/dev/null 2>&1
+  for _ in $(seq 30); do lmapped && sleep 2 && lmapped && return 0; sleep 3; done; return 1; }
+for a in 1 2 3; do lopen && break
+  echo "SMOKE: diag launcher open attempt $a: isOpen=$(timeout 5 qs ipc -c graphite-bar call launcher isOpen 2>&1) layers=$(hlayers | grep -o 'namespace: [a-z-]*' | tr '\n' ' ')"
+  timeout 25 graphite-launcher close >/dev/null 2>&1; sleep 3; done
 timeout 5 qs ipc -c graphite-bar call launcher query "" >/dev/null 2>&1   # show the app list in the shot
 echo "SMOKE: SHOT launcher"; sleep 8
 check "launcher opens (layer graphite-launcher mapped)" 'lmapped'
