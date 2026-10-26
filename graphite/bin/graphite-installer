@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Graphical installer backend (eco-4). The Quickshell window (graphite-installer/shell.qml,
+# title "Install Graphite") collects the answers and this script drives the existing
+# graphite-iso-install backend; the unattended path (graphite-iso-install --yes) is unchanged.
+#   graphite-installer auto           open the window on the live ISO (exec-once), else nothing
+#   graphite-installer open|close
+#   graphite-installer disks          PATH<TAB>SIZE<TAB>MODEL of installable disks (not the ISO medium)
+#   graphite-installer defaults       timezone/keymap/locale guesses as key=value
+#   graphite-installer answers        read key=value answers on stdin into the 0600 answers file
+#   graphite-installer check          validate the answers file (prints ok or error: ...)
+#   graphite-installer start          validate, then run graphite-iso-install in the background
+#   graphite-installer status         state=idle|running|done|failed, step=N/12, last log line
+# Answers: $GRAPHITE_INSTALLER_DIR/answers (default /tmp/graphite-installer), mode 0600, key=value:
+#   disk user password luks hostname timezone keymap locale profile nvidia
+set -uo pipefail
+D=${GRAPHITE_INSTALLER_DIR:-/tmp/graphite-installer}
+A=$D/answers; LOG=$D/install.log; RC=$D/exit
+QS=(qs -c graphite-installer)
+live() { [[ -d /run/archiso ]] || grep -q 'archisobasedir' /proc/cmdline 2>/dev/null; }
+running_win() { pgrep -f 'qs -c graphite-installer' >/dev/null; }
+colors() { local d=$HOME/.config/quickshell/graphite-installer b=$HOME/.config/quickshell/graphite-bar/Colors.qml
+  [[ -f $d/Colors.qml || ! -f $b ]] || { mkdir -p "$d"; cp "$b" "$d/Colors.qml"; }; }
+help() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
+get() { sed -n "s/^$1=//p" "$A" 2>/dev/null | head -1; }
+medium() { local s; s=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null) || return 0; lsblk -no PKNAME "$s" 2>/dev/null | head -1; }
+
+check() {
+  [[ -f $A ]] || { echo "error: no answers file"; return 1; }
+  local disk user host tz km loc prof e=()
+  disk=$(get disk); user=$(get user); host=$(get hostname); tz=$(get timezone); km=$(get keymap); loc=$(get locale); prof=$(get profile)
+  [[ -b $disk && $(lsblk -dno TYPE "$disk" 2>/dev/null) == disk ]] || e+=("disk: pick a disk")
+  [[ -n $disk && $(basename "$disk") == "$(medium)" ]] && e+=("disk: that is the install medium")
+  [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ && $user != root ]] || e+=("user: lowercase letters, digits, - and _ (not root)")
+  [[ -n $(get password) ]] || e+=("password: empty")
+  local l; l=$(get luks); ((${#l} >= 8)) || e+=("encryption passphrase: at least 8 characters")
+  [[ -z $host || $host =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]] || e+=("hostname: letters, digits and -")
+  [[ -z $tz || ( $tz != *..* && -e /usr/share/zoneinfo/$tz ) ]] || e+=("timezone: unknown $tz")
+  [[ -z $km || $km =~ ^[a-zA-Z0-9_-]+$ ]] || e+=("keymap: invalid")
+  [[ -z $loc || $loc =~ ^[a-zA-Z_]+\.UTF-8$ ]] || e+=("locale: like en_US.UTF-8")
+  [[ -z $prof || $prof == full || $prof == desktop ]] || e+=("profile: full or desktop")
+  if ((${#e[@]})); then printf 'error: %s\n' "${e[@]}"; return 1; fi
+  echo ok
+}
+
+case ${1:-} in
+  auto) live && ! running_win && { colors; setsid -f "${QS[@]}" >/dev/null 2>&1; }; true ;;
+  open) colors; running_win || setsid -f "${QS[@]}" >/dev/null 2>&1 ;;
+  close) pkill -f 'qs -c graphite-installer' 2>/dev/null; true ;;
+  disks)
+    m=$(medium)
+    lsblk -dpno NAME,SIZE,TYPE,RO,MODEL -e 7,11 2>/dev/null | awk -v m="/dev/$m" -v OFS='\t' '$3 == "disk" && $4 == 0 && $1 != m { model = ""; for (i = 5; i <= NF; i++) model = model (i > 5 ? " " : "") $i; print $1, $2, (model ? model : "disk") }' ;;
+  defaults)
+    tz=$(timedatectl show -p Timezone --value 2>/dev/null); echo "timezone=${tz:-UTC}"
+    echo "keymap=$(localectl status 2>/dev/null | sed -n 's/.*VC Keymap: *//p' | grep -v n/a || echo us)"
+    echo "locale=en_US.UTF-8"; echo "hostname=graphite"; echo "profile=full"
+    lspci -nn 2>/dev/null | grep -qiE '\[03(00|02)\].*\[10de:' && echo "nvidia=1" || echo "nvidia=0" ;;
+  answers) umask 077; mkdir -p "$D"; grep -E '^(disk|user|password|luks|hostname|timezone|keymap|locale|profile|nvidia)=' > "$A"; chmod 600 "$A"; check ;;
+  check) check ;;
+  start)
+    if [[ -f $LOG && ! -f $RC ]] && pgrep -f 'graphite-iso-install' >/dev/null; then echo "error: an install is already running"; exit 1; fi
+    check >/dev/null || { check; exit 1; }
+    umask 077; mkdir -p "$D"; get password > "$D/pw"; get luks > "$D/luks"; rm -f "$RC"
+    args=(--disk "$(get disk)" --user "$(get user)" --password-file "$D/pw" --luks-pass-file "$D/luks" --yes
+          --hostname "$(get hostname)" --timezone "$(get timezone)" --keymap "$(get keymap)" --locale "$(get locale)" --profile "$(get profile)")
+    [[ $(get nvidia) == 1 ]] && args+=(--nvidia)
+    # drop empty optional values so graphite-iso-install keeps its defaults
+    clean=(); i=0; while ((i < ${#args[@]})); do
+      if [[ ${args[i]} == --* && $((i + 1)) -lt ${#args[@]} && ${args[i+1]} != --* ]]; then
+        [[ -n ${args[i+1]} ]] && clean+=("${args[i]}" "${args[i+1]}"); i=$((i + 2))
+      else [[ ${args[i]} == --* ]] && clean+=("${args[i]}"); i=$((i + 1)); fi
+    done
+    sed -i -e '/^password=/d' -e '/^luks=/d' "$A"
+    setsid -f sh -c 'sudo -n graphite-iso-install "$@" >"$0" 2>&1; echo $? >"$0.rc"; mv "$0.rc" "'"$RC"'"; shred -u "'"$D"'/pw" "'"$D"'/luks" 2>/dev/null || rm -f "'"$D"'/pw" "'"$D"'/luks"' "$LOG" "${clean[@]}" >/dev/null 2>&1
+    echo "started" ;;
+  status)
+    if [[ -f $RC ]]; then [[ $(cat "$RC") == 0 ]] && echo state=done || echo state=failed
+    elif [[ -f $LOG ]]; then echo state=running; else echo state=idle; fi
+    [[ -f $LOG ]] && { echo "step=$(grep -c '==>' "$LOG")/12"; echo "last=$(grep -a '==>\|error' "$LOG" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"; } ;;
+  -h|--help|help) help ;;
+  *) help >&2; exit 1 ;;
+esac
