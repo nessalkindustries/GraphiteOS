@@ -227,7 +227,7 @@ if not NO_SMOKE and any("SELFTEST: ALL DONE" in open(f, errors="replace").read()
             s2.send(b"quit\n"); time.sleep(1); s2.close()
     def h5(text, p, st):
         make_handler(5)(text, p, st); shot(text, p, st)
-    qemu(["-monitor", f"unix:{sock},server,nowait"], "boot-shot.log", 3600,   # was 1500: boot+login under TCG took ~16 min, killing the smoke mid-run
+    qemu(["-monitor", f"unix:{sock},server,nowait"], "boot-shot.log", 5400,   # desk-4 control center checks add ~15 min; was 3600, before that 1500: boot+login under TCG took ~16 min, killing the smoke mid-run
            on_line=h5)
     if os.path.exists(ppm):
         try:
