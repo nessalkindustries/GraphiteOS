@@ -22,6 +22,7 @@ ShellRoot {
     Launcher { id: launcher }
     // notification daemon, popups, center and do-not-disturb. See Notifications.qml
     Notifications { id: notifications }
+    ControlCenter { id: controlCenter }
 
     // ---- audio: default sink via PipeWire (bind it so volume/mute are live) ----
     readonly property var sink: Pipewire.defaultAudioSink
@@ -161,7 +162,7 @@ ShellRoot {
                                     : root.netType === "wifi" ? ["󰤟", "󰤢", "󰤥", "󰤨"][Math.min(3, Math.floor(root.netSignal / 25))]
                                     : "󰤭"
                                 color: root.netType ? Colors.foreground : Colors.muted
-                                MouseArea { anchors.fill: parent; onClicked: root.run("kitty --class nmtui -e nmtui") }
+                                MouseArea { anchors.fill: parent; onClicked: controlCenter.open() }
                             }
                             // audio
                             Glyph {
@@ -171,7 +172,7 @@ ShellRoot {
                                 MouseArea {
                                     anchors.fill: parent; acceptedButtons: Qt.LeftButton | Qt.RightButton
                                     onClicked: e => e.button === Qt.RightButton
-                                        ? root.run("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle") : root.run("pavucontrol")
+                                        ? root.run("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle") : controlCenter.open()
                                     onWheel: w => root.run(w.angleDelta.y > 0 ? "wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+"
                                                                               : "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-")
                                 }

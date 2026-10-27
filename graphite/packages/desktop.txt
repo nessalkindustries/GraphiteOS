@@ -19,6 +19,10 @@ grim
 slurp
 wl-clipboard
 brightnessctl
+bluez
+bluez-utils
+# python-gobject: powerprofilesctl (control center power profile) needs it
+python-gobject
 pavucontrol
 pipewire
 pipewire-pulse

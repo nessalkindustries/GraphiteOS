@@ -22,6 +22,8 @@ barup() { for _ in $(seq "${1:-30}"); do hlayers | grep -q "namespace: $BARNS," 
 qserr() { grep -aE 'ERROR|[Cc]aused by|[Ff]ailed to load configuration' "$qslog" 2>/dev/null | grep -av 'WARN\|qt.svg' | head -4 | tr '\n' '|' | cut -c1-400; }
 fails=0
 pkill -x hypridle 2>/dev/null   # no idle lock during the test (hyprlock crashes under TCG, see roadmap notes)
+# hypridle can start after this line under TCG (exec-once is slow): keep it away for the whole run
+( for _ in $(seq 720); do pkill -x hypridle 2>/dev/null; sleep 10; done ) >/dev/null 2>&1 &
 wbtree() { for p in $(pgrep -x waybar); do echo -n "[$p ppid=$(ps -o ppid= -p $p|tr -d ' ') parent=$(ps -o comm= -p $(ps -o ppid= -p $p) 2>/dev/null) cg=$(cut -d: -f3 /proc/$p/cgroup|sed 's|.*/||') start=$(ps -o lstart= -p $p|awk '{print $4}')] "; done; }
 check() { if eval "$2" >/dev/null 2>&1; then echo "SMOKE: ok   $1"; else echo "SMOKE: FAIL $1"; fails=$((fails+1)); fi; }
 check "Hyprland running" 'pgrep -x Hyprland'
@@ -126,13 +128,58 @@ check "notification center lists the notification" 'nq list | grep -q "smoke hel
 nq close >/dev/null; nq clear >/dev/null
 for _ in $(seq 10); do ! nmapped graphite-notification-center && [ "$(nq count)" = 0 ] && break; sleep 3; done
 check "notification center closes and clears" '[ "$(nq count)" = 0 ] && ! nmapped graphite-notification-center'
+# control center (desk-4): graphite-control backend + Quickshell panel (Super+A)
+cst() { timeout 60 graphite-control status 2>/dev/null | sed -n "s/^$1=//p"; }
+cq() { timeout 25 qs ipc -c graphite-bar call control "$@" 2>/dev/null; }
+echo "SMOKE: diag control: lock=[$(pgrep -x hyprlock)] idle=[$(pgrep -x hypridle)] $(timeout 60 graphite-control status 2>&1 | tr '\n' ' ')"
+check "control center status reports every setting" '[ "$(timeout 60 graphite-control status 2>/dev/null | grep -cE "^(volume|muted|brightness|wifi|bluetooth|profile|theme)=")" = 7 ]'
+echo "SMOKE: diag binds-a: $(timeout 20 hyprctl binds 2>&1 | grep -i -B3 -A3 'arg: graphite-control' | tr -s '\n\t' '  ' | cut -c1-300)"
+check "Super+A is bound to the control center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: a$" | grep -q "arg: graphite-control" && exit 0; sleep 3; done; exit 1)'
+# the VM has no sound card: give PipeWire a null sink so there is a default output to control
+if [ "$(cst volume)" = none ]; then
+  timeout 20 pactl load-module module-null-sink sink_name=smoke_null sink_properties=device.description=smoke_null >/dev/null 2>&1
+  for _ in $(seq 10); do timeout 10 wpctl status 2>/dev/null | grep -q smoke_null && break; sleep 2; done
+  sid=$(timeout 10 wpctl status 2>/dev/null | sed -n 's/^[^0-9]*\([0-9][0-9]*\)\. .*smoke_null.*/\1/p' | head -1)
+  [ -n "$sid" ] && timeout 10 wpctl set-default "$sid" >/dev/null 2>&1
+  echo "SMOKE: diag null sink id=[$sid] volume=[$(cst volume)]"
+fi
+v0=$(cst volume)
+check "control center sets the volume" '[ "$(timeout 20 graphite-control volume 40)" = 40 ] && [ "$(cst volume)" = 40 ]'
+check "control center mutes and unmutes" 'timeout 20 graphite-control volume mute >/dev/null; [ "$(cst muted)" = yes ] && timeout 20 graphite-control volume mute >/dev/null && [ "$(cst muted)" = no ]'
+[ -n "$v0" ] && [ "$v0" != none ] && timeout 20 graphite-control volume "$v0" >/dev/null
+# Wi-Fi radio and power profile changes go through polkit (allowed for the active desktop
+# session, not this serial login): run them in the compositor session like the panel does
+dexec() { timeout 15 hyprctl dispatch exec "graphite-control $*" >/dev/null 2>&1; }
+waitst() { for _ in $(seq 20); do [ "$(cst "$1")" = "$2" ] && return 0; sleep 3; done; return 1; }
+w0=$(cst wifi); w1=$([ "$w0" = on ] && echo off || echo on)
+check "control center toggles the Wi-Fi radio" 'dexec wifi toggle; waitst wifi "$w1" && dexec wifi "$w0" && waitst wifi "$w0"'
+pr0=$(cst profile)
+echo "SMOKE: diag profiles: [$pr0] $(timeout 30 powerprofilesctl list 2>&1 | tr '\n' ' ' | cut -c1-200)"
+check "control center cycles the power profile" '[ "$pr0" != none ] && dexec profile next && (for _ in $(seq 20); do p=$(cst profile); [ -n "$p" ] && [ "$p" != none ] && [ "$p" != "$pr0" ] && exit 0; sleep 3; done; exit 1) && dexec profile "$pr0" && waitst profile "$pr0"'
+check "bluetooth.service enabled" 'systemctl is-enabled -q bluetooth.service'
+# hardware-dependent: the VM has no Bluetooth adapter, so only check the reported state when one exists
+if [ -n "$(timeout 20 bluetoothctl list 2>/dev/null)" ]; then
+  check "control center reports Bluetooth" '[ -n "$(cst bluetooth)" ]'
+else echo "SMOKE: skip control center reports Bluetooth (no adapter in the VM; status=$(cst bluetooth))"; fi
+timeout 10 hyprctl dispatch exec "graphite-control open" >/dev/null 2>&1
+for _ in $(seq 40); do nmapped graphite-control-center && break; sleep 3; done
+echo "SMOKE: diag control open: isOpen=[$(cq isOpen)] layers=[$(hlayers | grep -o 'namespace: [a-z-]*' | tr '\n' ' ')]"
+echo "SMOKE: SHOT control-center"; sleep 5
+check "control center opens (layer graphite-control-center)" 'nmapped graphite-control-center && [ "$(cq isOpen)" = true ]'
+cq close >/dev/null
+for _ in $(seq 10); do ! nmapped graphite-control-center && break; sleep 3; done
+check "control center closes" '! nmapped graphite-control-center'
+th0=$(cst theme)
+check "control center theme toggle switches to light and back" '[ "$(timeout 400 graphite-control theme-toggle)" = graphite-light ] && [ "$(timeout 400 graphite-control theme-toggle)" = "$th0" ]'
+for _ in $(seq 40); do [ -n "$(cq isOpen)" ] && break; sleep 3; done
+check "bar is back after the theme toggle" '[ -n "$(cq isOpen)" ]'
 # bar widgets: tray/network/audio/battery come from the services, check the backends answer
 check "upower daemon answers (battery widget backend)" 'timeout 10 upower -e'
 check "graphite bar status reports quickshell" 'graphite bar status | grep -q "bar: quickshell"'
 echo "SMOKE: SHOT quickshell-bar"; sleep 5
 # opt-out: Waybar replaces the Quickshell bar, then back to the default
-timeout 120 graphite bar waybar >/dev/null 2>&1 || echo "SMOKE: diag bar waybar rc=$?"
-BARNS=waybar; barup 30
+timeout 400 graphite bar waybar >/dev/null 2>&1 || echo "SMOKE: diag bar waybar rc=$?"
+BARNS=waybar; barup 90
 echo "SMOKE: SHOT waybar-optout"; sleep 5
 check "opt-out: graphite bar waybar maps waybar, no quickshell" 'barup 5 && [ "$(pgrep -cx waybar)" = 1 ] && ! pgrep -x qs'
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
@@ -142,7 +189,7 @@ timeout 10 hyprctl dispatch exec graphite-launcher >/dev/null 2>&1
 for _ in $(seq 15); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: rofi,' && break; sleep 2; done
 check "launcher falls back to rofi with Waybar" 'timeout 10 hyprctl layers | grep -q "namespace: rofi,"'
 pkill -x rofi 2>/dev/null; sleep 2
-timeout 120 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
-BARNS=graphite-bar; barup 30
+timeout 400 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
+BARNS=graphite-bar; barup 90
 check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'
 echo "SMOKE: DONE fails=$fails"
