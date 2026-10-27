@@ -71,10 +71,13 @@ case ${1:-toggle} in
     cur=$(theme); mkdir -p "$state"
     if [[ $cur == graphite-light ]]; then
       dark=$(cat "$state/dark-theme" 2>/dev/null); [[ -n $dark ]] || dark=graphite-teal
-      graphite-theme set "$dark" >/dev/null || exit 1
+      to=$dark
     else
-      echo "$cur" >"$state/dark-theme"; graphite-theme set graphite-light >/dev/null || exit 1
+      echo "$cur" >"$state/dark-theme"; to=graphite-light
     fi
+    # the theme is saved before the desktop reload; a slow bar restart must not lose the switch
+    timeout "${GRAPHITE_TOGGLE_TIMEOUT:-600}" graphite-theme set "$to" >/dev/null
+    [[ $(theme) == "$to" ]] || exit 1
     theme ;;
   *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1 ;;
 esac

@@ -37,8 +37,10 @@ nkitty() { hclients | grep -c "class: kitty"; }
 before=$(pgrep -cx kitty)
 for _ in 1 2 3; do  # a dispatch can be lost when hyprctl gets no answer under TCG load
   timeout 15 hyprctl dispatch exec kitty >/dev/null 2>&1
-  for _ in $(seq 20); do [ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ] && break 2; sleep 2; done
+  for _ in $(seq 40); do [ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ] && break 2; sleep 3; done
+  [ "$(pgrep -cx kitty)" -gt "$before" ] && break   # started but not mapped yet: wait below instead of spawning more
 done
+for _ in $(seq 60); do [ "$(nkitty)" -gt 0 ] && break; sleep 3; done   # slow first map under load
 check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ]'
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
@@ -178,7 +180,10 @@ cq close >/dev/null
 for _ in $(seq 10); do ! nmapped graphite-control-center && break; sleep 3; done
 check "control center closes" '! nmapped graphite-control-center'
 th0=$(cst theme)
-check "control center theme toggle switches to light and back" '[ "$(timeout 400 graphite-control theme-toggle)" = graphite-light ] && [ "$(timeout 400 graphite-control theme-toggle)" = "$th0" ]'
+# judge the saved theme, not the toggle's stdout: under heavy TCG load the bar restart inside
+# graphite-theme can outlast a timeout, which used to blank the output (h18: a 79 min stall)
+tt() { timeout 900 graphite-control theme-toggle >/dev/null 2>&1; graphite-theme current; }
+check "control center theme toggle switches to light and back" '[ "$(tt)" = graphite-light ] && [ "$(tt)" = "$th0" ]'
 for _ in $(seq 40); do [ -n "$(cq isOpen)" ] && break; sleep 3; done
 check "bar is back after the theme toggle" '[ -n "$(cq isOpen)" ]'
 # bar widgets: tray/network/audio/battery come from the services, check the backends answer
