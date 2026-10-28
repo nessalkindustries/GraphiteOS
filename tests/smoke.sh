@@ -274,9 +274,19 @@ check "perf: status lists linux and linux-lts" 'graphite perf status | grep -q "
 check "perf: kernel plan offers linux-zen" 'graphite perf kernel plan | grep -q "linux-zen linux-zen-headers"'
 check "perf: gaming preset written and removed" 'r=$(mktemp -d) && GRAPHITE_ROOT=$r graphite perf tune gaming >/dev/null && grep -q "^kernel.split_lock_mitigate = 0" $r/etc/sysctl.d/95-graphite-perf.conf && GRAPHITE_ROOT=$r graphite perf status | grep -q "tuning:   gaming" && GRAPHITE_ROOT=$r graphite perf tune default >/dev/null && [ ! -e $r/etc/sysctl.d/95-graphite-perf.conf ]'
 check "perf: preset keys exist on this kernel" '(for k in kernel.split_lock_mitigate vm.compaction_proactiveness vm.dirty_bytes kernel.sched_autogroup_enabled; do [ -e /proc/sys/${k//.//} ] || [ $k = kernel.split_lock_mitigate ] || exit 1; done)'
-# workload profiles (game-4): the full install has gaming; creator stays available
-check "profile: status shows gaming installed, creator available" 'graphite profile status | grep -qx gaming=installed && graphite profile status | grep -qx creator=available'
-check "profile: gamescope session in the login screen" 'pacman -Qq gamescope && grep -q "^Exec=gamescope" /usr/share/wayland-sessions/graphite-gamescope.desktop'
+# workload profiles (game-4). The harness installs --profile desktop (full only with
+# tests/qemu-install.py --profile full), so gaming is normally "available" here: then check the
+# signed repo's graphite-gaming package carries gamescope and the Steam (gamescope) session.
+if pacman -Qq graphite-gaming >/dev/null 2>&1; then
+  check "profile: status shows gaming installed, creator available" 'graphite profile status | grep -qx gaming=installed && graphite profile status | grep -qx creator=available'
+  check "profile: gamescope session in the login screen" 'pacman -Qq gamescope && grep -q "^Exec=gamescope" /usr/share/wayland-sessions/graphite-gamescope.desktop'
+else
+  check "profile: status shows gaming available, creator available" 'graphite profile status | grep -qx gaming=available && graphite profile status | grep -qx creator=available'
+  gpkg=$(mktemp -d)
+  check "profile: gamescope session in the login screen" 'pacman -Si graphite-gaming | grep -E "^Depends On" | grep -qw gamescope && graphite profile plan gaming | grep -qw gamescope && u=$(pacman -Sp -dd --print-format %l graphite-gaming 2>/dev/null | tail -1) && case $u in file://*) cp "${u#file://}" $gpkg/g.pkg;; *) timeout 120 curl -fsSL "$u" -o $gpkg/g.pkg;; esac && bsdtar -xOf $gpkg/g.pkg usr/share/wayland-sessions/graphite-gamescope.desktop | grep -q "^Exec=gamescope"'
+  echo "SMOKE: diag profile pkg: $(pacman -Sp -dd --print-format %l graphite-gaming 2>&1 | tail -1)"
+  rm -rf "$gpkg"
+fi
 check "profile: creator plan lists OBS" 'graphite profile plan creator | grep -q "obs-studio"'
 check "profile: rejects an unknown profile" '! graphite profile plan bogus 2>/dev/null'
 echo "SMOKE: DONE fails=$fails"
