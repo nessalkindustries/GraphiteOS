@@ -166,7 +166,11 @@ w0=$(cst wifi); w1=$([ "$w0" = on ] && echo off || echo on)
 check "control center toggles the Wi-Fi radio" 'dexec wifi toggle; waitst wifi "$w1" && dexec wifi "$w0" && waitst wifi "$w0"'
 pr0=$(cst profile)
 echo "SMOKE: diag profiles: [$pr0] $(timeout 30 powerprofilesctl list 2>&1 | tr '\n' ' ' | cut -c1-200)"
-check "control center cycles the power profile" '[ "$pr0" != none ] && dexec profile next && (for _ in $(seq 20); do p=$(cst profile); [ -n "$p" ] && [ "$p" != none ] && [ "$p" != "$pr0" ] && exit 0; sleep 3; done; exit 1) && dexec profile "$pr0" && waitst profile "$pr0"'
+# powerprofilesctl (python) can take >15 s to answer under TCG and graphite-control then reports
+# none and changes nothing: re-dispatch "next" if the profile has not moved after ~1 min
+pcycle() { for _ in 1 2 3; do dexec profile next; for _ in $(seq 10); do p=$(cst profile); [ -n "$p" ] && [ "$p" != none ] && [ "$p" != "$pr0" ] && return 0; sleep 3; done; done; return 1; }
+check "control center cycles the power profile" '[ "$pr0" != none ] && pcycle && (for _ in 1 2 3; do dexec profile "$pr0"; waitst profile "$pr0" && exit 0; done; exit 1)'
+echo "SMOKE: diag profile after cycle: [$(cst profile)]"
 check "bluetooth.service enabled" 'systemctl is-enabled -q bluetooth.service'
 # hardware-dependent: the VM has no Bluetooth adapter, so only check the reported state when one exists
 if [ -n "$(timeout 20 bluetoothctl list 2>/dev/null)" ]; then
@@ -213,8 +217,11 @@ check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgr
 check "settings: settings.conf is generated and sourced" '[ -f ~/.config/graphite/settings.conf ] && grep -q "^source = ~/.config/graphite/settings.conf" ~/.config/hypr/hyprland.conf'
 check "Super+I is bound to Settings" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: i$" | grep -q "arg: graphite-settings" && exit 0; sleep 3; done; exit 1)'
 check "settings: get reports every key" '[ "$(timeout 30 graphite-settings get | grep -cE "^(scale|kb_layout|kb_variant|sensitivity|natural_scroll|follow_mouse|theme|bar|wifi)=")" -ge 9 ]'
-check "settings: natural scrolling applies to Hyprland" 'timeout 30 graphite-settings set natural_scroll true && timeout 10 hyprctl getoption input:touchpad:natural_scroll | grep -q "int: 1" && timeout 30 graphite-settings set natural_scroll false && timeout 10 hyprctl getoption input:touchpad:natural_scroll | grep -q "int: 0"'
-check "settings: pointer speed applies to Hyprland" 'timeout 30 graphite-settings set sensitivity 0.25 && timeout 10 hyprctl getoption input:sensitivity | grep -q "float: 0.25" && timeout 30 graphite-settings set sensitivity 0'
+# Hyprland 0.56 prints bools as "bool: true|false" (older: "int: 1|0"); hyprctl can lag under TCG, so poll
+hopt() { for _ in $(seq 10); do timeout 20 hyprctl getoption "$1" 2>/dev/null | grep -qE "$2" && return 0; sleep 3; done; return 1; }
+check "settings: natural scrolling applies to Hyprland" 'timeout 90 graphite-settings set natural_scroll true && hopt input:touchpad:natural_scroll "(int: 1|bool: true)\$" && timeout 90 graphite-settings set natural_scroll false && hopt input:touchpad:natural_scroll "(int: 0|bool: false)\$"'
+check "settings: pointer speed applies to Hyprland" 'timeout 90 graphite-settings set sensitivity 0.25 && hopt input:sensitivity "float: 0\.25" && timeout 90 graphite-settings set sensitivity 0'
+echo "SMOKE: diag settings: $(timeout 20 hyprctl getoption input:touchpad:natural_scroll 2>&1 | head -1) | $(timeout 20 hyprctl getoption input:sensitivity 2>&1 | head -1)"
 check "settings: rejects a bad value" '! timeout 30 graphite-settings set scale banana 2>/dev/null'
 check "settings: about reports the system" 'timeout 30 graphite-settings about | grep -q "^kernel="'
 timeout 10 hyprctl dispatch exec "graphite-settings open" >/dev/null 2>&1

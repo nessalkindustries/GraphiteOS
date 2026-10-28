@@ -40,7 +40,20 @@ valid() {
     *) return 1 ;;
   esac
 }
-apply() { timeout 10 hyprctl reload >/dev/null 2>&1 || true; }
+# Apply one changed key live with `hyprctl keyword` (cheap; settings.conf keeps it across
+# reloads/logins). A full `hyprctl reload` re-applies monitors, theme and animations and can
+# take longer than any sane timeout on a slow machine, so it is only the fallback.
+apply() {
+  local k=$1 v=$2 kw
+  case $k in
+    sensitivity|follow_mouse|kb_layout) kw="input:$k $v" ;;
+    natural_scroll) kw="input:touchpad:natural_scroll $v" ;;
+    kb_variant) [[ -n $v ]] && kw="input:kb_variant $v" ;;
+    scale) kw="monitor ,preferred,auto,$([[ $v == auto ]] && echo 1 || echo "$v")" ;;
+  esac
+  if [[ -n ${kw:-} ]] && timeout 30 hyprctl keyword $kw 2>/dev/null | grep -qx ok; then return 0; fi
+  timeout 60 hyprctl reload config-only >/dev/null 2>&1 || true
+}
 
 case ${1:-open} in
   open|toggle|close)
@@ -65,7 +78,7 @@ case ${1:-open} in
     esac
     [[ -v DEF[$k] ]] || { echo "unknown key: $k" >&2; exit 1; }
     valid "$k" "$v" || { echo "invalid value for $k: $v" >&2; exit 1; }
-    write "$k" "$v"; apply; echo "$k=$v" ;;
+    write "$k" "$v"; apply "$k" "$v"; echo "$k=$v" ;;
   wifi-list) timeout 20 nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | head -20 ;;
   about)
     . /etc/os-release 2>/dev/null
