@@ -220,14 +220,14 @@ if not NO_SMOKE and any("SELFTEST: ALL DONE" in open(f, errors="replace").read()
                     from PIL import Image
                     Image.open(x).save(x[:-4] + ".png"); os.remove(x); note(f"screenshot: out/harness/smoke-{name}.png")
                 except Exception as e: note(f"smoke shot {name} failed: {e}")
-        if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.monotonic() - st["st"] > 5400):   # TCG: full smoke took ~10-13 min; with desk-4 on a loaded host 75+ min
+        if "st" in st and "shot" not in st and ("@SMOKE: DONE" in text or time.monotonic() - st["st"] > 9000):   # TCG: full smoke took ~10-13 min; with desk-4 on a loaded host 75+ min
             st["shot"] = 1; time.sleep(20)   # let the kitty opened by smoke.sh draw
             s2 = socket.socket(socket.AF_UNIX); s2.connect(sock)
             s2.send(f"screendump {ppm}\n".encode()); time.sleep(3)
             s2.send(b"quit\n"); time.sleep(1); s2.close()
     def h5(text, p, st):
         make_handler(5)(text, p, st); shot(text, p, st)
-    qemu(["-monitor", f"unix:{sock},server,nowait"], "boot-shot.log", 5400,   # desk-4 control center checks add ~15 min; was 3600, before that 1500: boot+login under TCG took ~16 min, killing the smoke mid-run
+    qemu(["-monitor", f"unix:{sock},server,nowait"], "boot-shot.log", 9000,   # desk-4 control center checks add ~15 min; was 3600, before that 1500: boot+login under TCG took ~16 min, killing the smoke mid-run
            on_line=h5)
     if os.path.exists(ppm):
         try:
