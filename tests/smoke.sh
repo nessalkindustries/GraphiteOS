@@ -37,8 +37,10 @@ nkitty() { hclients | grep -c "class: kitty"; }
 before=$(pgrep -cx kitty)
 for _ in 1 2 3; do  # a dispatch can be lost when hyprctl gets no answer under TCG load
   timeout 15 hyprctl dispatch exec kitty >/dev/null 2>&1
-  for _ in $(seq 20); do [ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ] && break 2; sleep 2; done
+  for _ in $(seq 40); do [ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ] && break 2; sleep 3; done
+  [ "$(pgrep -cx kitty)" -gt "$before" ] && break   # started but not mapped yet: wait below instead of spawning more
 done
+for _ in $(seq 60); do [ "$(nkitty)" -gt 0 ] && break; sleep 3; done   # slow first map under load
 check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ]'
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
@@ -63,6 +65,14 @@ echo "SMOKE: diag waybar after nord: $(wbtree)"
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 nord=$(sed -n 's/^accent *= *"\(#[0-9a-fA-F]*\)".*/\1/p' /usr/share/graphite/themes/graphite-nord/colors.toml)
 check "kitty colours follow theme (nord accent $nord)" 'grep -qi "$nord" ~/.config/graphite/current/kitty.conf'
+# desk-5: wallpaper-derived theme (offline palette extraction), then back to teal below
+command -v graphite-palette >/dev/null && python3 -c 'import PIL' 2>/dev/null || echo "SMOKE: diag palette deps missing"
+timeout 400 graphite theme from-wallpaper /usr/share/backgrounds/graphite/graphite-violet.png >/dev/null 2>&1 || echo "SMOKE: diag from-wallpaper rc=$?"
+wpacc=$(sed -n 's/^accent *= *"\(#[0-9a-fA-F]*\)".*/\1/p' ~/.config/graphite/themes/wallpaper/colors.toml 2>/dev/null)
+echo "SMOKE: diag from-wallpaper accent=$wpacc theme=$(graphite-theme current)"
+check "theme from-wallpaper writes a palette and applies it" '[ "$(graphite-theme current)" = wallpaper ] && [ -n "$wpacc" ] && grep -qi "$wpacc" ~/.config/graphite/current/kitty.conf'
+check "from-wallpaper theme uses the wallpaper" 'grep -q "themes/wallpaper/wallpaper.png" ~/.config/graphite/current/wallpaper'
+barup 60; echo "SMOKE: SHOT theme-from-wallpaper"; sleep 10
 echo "SMOKE: diag t=$(date +%T) teal switch start"
 timeout 180 graphite-theme set graphite-teal >/dev/null 2>&1 || echo "SMOKE: diag theme teal rc=$?"
 echo "SMOKE: diag t=$(date +%T) teal switch returned"
@@ -75,7 +85,8 @@ pgrep -x qs >/dev/null || echo "SMOKE: diag bar log: $(tail -5 $wblog 2>/dev/nul
 lq() { timeout 25 graphite-launcher query "$1" 2>/dev/null; }
 lmapped() { hlayers | grep -q 'namespace: graphite-launcher,'; }
 lgone() { local o; o=$(hlayers); grep -q 'namespace: graphite-bar,' <<<"$o" && ! grep -q 'namespace: graphite-launcher,' <<<"$o"; }
-spacebound() { for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: space" | grep -q "arg: graphite-launcher" && return 0; sleep 2; done; return 1; }
+# hyprctl can answer empty for minutes right after a theme switch reload under TCG (h19): retry ~4 min
+spacebound() { for _ in $(seq 20); do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: space" | grep -q "arg: graphite-launcher" && return 0; sleep 3; done; return 1; }
 echo "SMOKE: diag launcher: calc=[$(lq '2+3*4')] app=[$(lq kitty)] cmd=[$(lq '>lock')] run=[$(lq '>echo hi')] theme=[$(lq 'theme: nord')]"
 echo "SMOKE: diag qs procs: $(pgrep -a qs | tr '\n' '|' | cut -c1-300) binds-space: $(timeout 10 hyprctl binds 2>&1 | grep -i -A12 'key: space' | tr -s '\n\t' '  ' | cut -c1-400) layers: $(timeout 10 hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | tr '\n' ' ')"
 check "Super+Space is bound to graphite-launcher" 'spacebound'
@@ -170,7 +181,10 @@ cq close >/dev/null
 for _ in $(seq 10); do ! nmapped graphite-control-center && break; sleep 3; done
 check "control center closes" '! nmapped graphite-control-center'
 th0=$(cst theme)
-check "control center theme toggle switches to light and back" '[ "$(timeout 400 graphite-control theme-toggle)" = graphite-light ] && [ "$(timeout 400 graphite-control theme-toggle)" = "$th0" ]'
+# judge the saved theme, not the toggle's stdout: under heavy TCG load the bar restart inside
+# graphite-theme can outlast a timeout, which used to blank the output (h18: a 79 min stall)
+tt() { timeout 900 graphite-control theme-toggle >/dev/null 2>&1; graphite-theme current; }
+check "control center theme toggle switches to light and back" '[ "$(tt)" = graphite-light ] && [ "$(tt)" = "$th0" ]'
 for _ in $(seq 40); do [ -n "$(cq isOpen)" ] && break; sleep 3; done
 check "bar is back after the theme toggle" '[ -n "$(cq isOpen)" ]'
 # bar widgets: tray/network/audio/battery come from the services, check the backends answer
@@ -178,18 +192,21 @@ check "upower daemon answers (battery widget backend)" 'timeout 10 upower -e'
 check "graphite bar status reports quickshell" 'graphite bar status | grep -q "bar: quickshell"'
 echo "SMOKE: SHOT quickshell-bar"; sleep 5
 # opt-out: Waybar replaces the Quickshell bar, then back to the default
-timeout 400 graphite bar waybar >/dev/null 2>&1 || echo "SMOKE: diag bar waybar rc=$?"
+timeout 900 graphite bar waybar >/dev/null 2>&1 || echo "SMOKE: diag bar waybar rc=$?"
 BARNS=waybar; barup 90
+echo "SMOKE: diag optout: choice=$(cat ~/.config/graphite/bar) qs=$(pgrep -cx qs) waybar=$(pgrep -cx waybar) log=$(tail -4 "${XDG_RUNTIME_DIR:-/tmp}/graphite-waybar.log" 2>/dev/null | tr '\n' '|')"
 echo "SMOKE: SHOT waybar-optout"; sleep 5
 check "opt-out: graphite bar waybar maps waybar, no quickshell" 'barup 5 && [ "$(pgrep -cx waybar)" = 1 ] && ! pgrep -x qs'
 barup 1 || echo "SMOKE: diag waybar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 check "opt-out: mako shows notifications with Waybar" '(for _ in $(seq 10); do pgrep -x mako >/dev/null && exit 0; sleep 2; done; exit 1)'
 # without Quickshell the launcher falls back to rofi
-timeout 10 hyprctl dispatch exec graphite-launcher >/dev/null 2>&1
-for _ in $(seq 15); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: rofi,' && break; sleep 2; done
-check "launcher falls back to rofi with Waybar" 'timeout 10 hyprctl layers | grep -q "namespace: rofi,"'
+for _ in 1 2 3; do
+  timeout 15 hyprctl dispatch exec graphite-launcher >/dev/null 2>&1
+  for _ in $(seq 20); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: rofi,' && break 2; pgrep -x rofi >/dev/null && sleep 3 && continue; sleep 2; done
+done
+check "launcher falls back to rofi with Waybar" '(for _ in 1 2 3; do timeout 10 hyprctl layers | grep -q "namespace: rofi," && exit 0; sleep 3; done; exit 1)'
 pkill -x rofi 2>/dev/null; sleep 2
-timeout 400 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
+timeout 900 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
 BARNS=graphite-bar; barup 90
 check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'
 echo "SMOKE: DONE fails=$fails"

@@ -19,7 +19,8 @@ Usage: graphite <command> [args]
   repo                        [graphite] repo status: servers, signature policy, trusted keys
   migrate [--pending]         run (or list) pending migrations for this user
   bar [status|quickshell|waybar]  which bar runs: Quickshell (default) or Waybar (opt-out)
-  theme list|current|set N|pick   themes (colors.toml -> generated configs; Super+T)
+  theme list|current|set N|pick|from-wallpaper IMG [--light]
+                             themes (colors.toml -> generated configs; Super+T)
   splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
   control [status|...]       control center: volume, brightness, Wi-Fi, Bluetooth, power, theme (Super+A)
   keybinds                    keybinding cheatsheet (also Super+K)
@@ -220,8 +221,16 @@ bar() {
       echo "bar set to $1"
       if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
         # through Hyprland, so the bar gets the compositor's environment (see graphite-theme)
-        timeout 10 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
-        sleep 1; for _ in $(seq 180); do pgrep -f 'graphite-bar --restart' >/dev/null || break; sleep 0.5; done
+        # under load a dispatch can be lost (hyprctl gets no answer): confirm the restart really
+        # started, retry, and as a last resort start it here so the switch never silently no-ops
+        local want=qs other=waybar ok=0; [[ $1 == waybar ]] && { want=waybar; other=qs; }
+        for _ in 1 2 3; do
+          timeout 15 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+          for _ in $(seq 30); do pgrep -f '(^|/)graphite-bar --restart' >/dev/null && { ok=1; break 2; }; sleep 0.5; done
+        done
+        ((ok)) || setsid -f graphite-bar --restart >/dev/null 2>&1
+        sleep 1; for _ in $(seq 900); do pgrep -f '(^|/)graphite-bar --restart' >/dev/null || break; sleep 0.5; done
+        pgrep -x "$want" >/dev/null && ! pgrep -x "$other" >/dev/null || echo "warning: bar switch not finished yet" >&2
         bar status | tail -1
       else
         echo "takes effect at the next login"
