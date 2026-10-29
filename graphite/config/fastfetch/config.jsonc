@@ -49,7 +49,7 @@
     },
     {
       "type": "gpu",
-      "key": "├─ 󰍛",
+      "key": "├─ 󰢮",
       "format": "{name}"
     },
     {
@@ -65,7 +65,7 @@
     },
     {
       "type": "memory",
-      "key": "├─ ",
+      "key": "├─ 󰍛",
       "format": "{used} / {total} ({percentage})"
     },
     {
@@ -99,17 +99,17 @@
     },
     {
       "type": "kernel",
-      "key": "├─ ",
+      "key": "├─ ",
       "format": "{sysname} {release}"
     },
     {
       "type": "wm",
-      "key": "├─ ",
+      "key": "├─ ",
       "format": "{pretty-name}{?version} {version}{?}{?protocol-name} ({protocol-name}){?}"
     },
     {
       "type": "terminal",
-      "key": "├─ ",
+      "key": "├─ ",
       "format": "{pretty-name}{?version} {version}{?}"
     },
     {
@@ -124,7 +124,7 @@
     },
     {
       "type": "terminalfont",
-      "key": "└─ ",
+      "key": "└─ ",
       "format": "{name} ({size}pt)"
     },
     {
