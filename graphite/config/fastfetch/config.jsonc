@@ -1,28 +1,158 @@
-// Graphite fastfetch. The logo uses terminal colours 6/14 = theme accent/accent2.
+// Graphite fetch: three boxed sections (Hardware, Software, Age / Uptime / Update).
+// Colours are terminal colours, so they follow the active Graphite theme:
+// 36 = accent, 96 = accent2 (section titles), 90 = muted (box lines).
+// Custom values come from `graphite-fetch <os|theme|browser|palette|age|updated>`.
 {
   "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
   "logo": {
-    "type": "file",
-    "source": "/usr/share/graphite/fastfetch/logo.txt",
-    "color": { "1": "36", "2": "96", "3": "90" },
-    "padding": { "top": 1, "right": 3 }
+    "type": "none"
   },
-  "display": { "separator": "  ", "color": { "keys": "36" } },
+  "display": {
+    "separator": "  ",
+    "color": {
+      "keys": "36",
+      "output": "default"
+    },
+    "key": {
+      "type": "string"
+    },
+    "size": {
+      "binaryPrefix": "iec",
+      "ndigits": 2
+    },
+    "percent": {
+      "type": [
+        "num",
+        "num-color"
+      ],
+      "color": {
+        "green": "36",
+        "yellow": "33",
+        "red": "31"
+      }
+    }
+  },
   "modules": [
-    "title",
-    { "type": "custom", "format": "\u001b[90m────────────────────────────" },
-    { "type": "os",       "key": "󰣇 os" },
-    { "type": "kernel",   "key": " kernel" },
-    { "type": "wm",       "key": " wm" },
-    { "type": "packages", "key": "󰏗 pkgs" },
-    { "type": "shell",    "key": " shell" },
-    { "type": "terminal", "key": " term" },
-    { "type": "cpu",      "key": "󰻠 cpu", "format": "{name}" },
-    { "type": "gpu",      "key": "󰍛 gpu", "format": "{name}" },
-    { "type": "memory",   "key": " mem" },
-    { "type": "disk",     "key": "󰋊 disk", "folders": "/", "format": "{size-used} / {size-total} ({size-percentage})" },
-    { "type": "uptime",   "key": "󰅐 up" },
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌───────────────────────\u001b[96mHardware\u001b[90m───────────────────────┐"
+    },
+    {
+      "type": "host",
+      "key": "┌ 󰌢 PC",
+      "format": "{name}{?version} ({version}){?}"
+    },
+    {
+      "type": "cpu",
+      "key": "├─ 󰻠",
+      "format": "{name} ({cores-physical}c/{cores-logical}t){?freq-max} @ {freq-max}{?}"
+    },
+    {
+      "type": "gpu",
+      "key": "├─ 󰍛",
+      "format": "{name}"
+    },
+    {
+      "type": "display",
+      "key": "├─ 󰍹",
+      "format": "{width}x{height} @ {scale-factor}x{?inch} in {inch}\"{?}{?refresh-rate}, {refresh-rate} Hz{?}{?type} [{type}]{?}"
+    },
+    {
+      "type": "disk",
+      "key": "├─ 󰋊",
+      "folders": "/",
+      "format": "{size-used} / {size-total} ({size-percentage}) - {filesystem}"
+    },
+    {
+      "type": "memory",
+      "key": "├─ ",
+      "format": "{used} / {total} ({percentage})"
+    },
+    {
+      "type": "swap",
+      "key": "└─ 󰾴",
+      "format": "{?total}{used} / {total} ({percentage}){?}{/total}none{/}"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└──────────────────────────────────────────────────────┘"
+    },
     "break",
-    { "type": "colors", "symbol": "circle" }
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌───────────────────────\u001b[96mSoftware\u001b[90m───────────────────────┐"
+    },
+    {
+      "type": "command",
+      "key": "┌ 󰣇 OS",
+      "text": "graphite-fetch os"
+    },
+    {
+      "type": "command",
+      "key": "├─ 󰏘",
+      "text": "graphite-fetch theme"
+    },
+    {
+      "type": "command",
+      "key": "├─ 󰖟",
+      "text": "graphite-fetch browser"
+    },
+    {
+      "type": "kernel",
+      "key": "├─ ",
+      "format": "{sysname} {release}"
+    },
+    {
+      "type": "wm",
+      "key": "├─ ",
+      "format": "{pretty-name}{?version} {version}{?}{?protocol-name} ({protocol-name}){?}"
+    },
+    {
+      "type": "terminal",
+      "key": "├─ ",
+      "format": "{pretty-name}{?version} {version}{?}"
+    },
+    {
+      "type": "packages",
+      "key": "├─ 󰏗",
+      "format": "{pacman} (pacman){?flatpak-all}, {flatpak-all} (flatpak){?}"
+    },
+    {
+      "type": "command",
+      "key": "├─ 󰸌",
+      "text": "graphite-fetch palette"
+    },
+    {
+      "type": "terminalfont",
+      "key": "└─ ",
+      "format": "{name} ({size}pt)"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└──────────────────────────────────────────────────────┘"
+    },
+    "break",
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌────────────────\u001b[96mAge / Uptime / Update\u001b[90m─────────────────┐"
+    },
+    {
+      "type": "command",
+      "key": "󰔟 OS Age",
+      "text": "graphite-fetch age"
+    },
+    {
+      "type": "uptime",
+      "key": "󰅐 Uptime"
+    },
+    {
+      "type": "command",
+      "key": "󰚰 Update",
+      "text": "graphite-fetch updated"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└──────────────────────────────────────────────────────┘"
+    }
   ]
 }

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# graphite-fetch: Graphite system summary (fastfetch, config in ~/.config/fastfetch/config.jsonc)
+# plus the small helpers its custom "command" modules call. Every helper prints
+# something sensible (or "n/a") when the information is missing (VMs, containers).
+GRAPHITE_PATH=${GRAPHITE_PATH:-/usr/share/graphite}
+na() { echo "n/a"; }
+theme_dir() {
+  local t d; t=$(cat "$HOME/.config/graphite/theme" 2>/dev/null || echo graphite-teal)
+  for d in "$HOME/.config/graphite/themes/$t" "$GRAPHITE_PATH/themes/$t"; do
+    [[ -f $d/colors.toml ]] && { echo "$d"; return 0; }; done
+  return 1
+}
+tval() { sed -nE "s/^$1[[:space:]]*=[[:space:]]*\"?([^\"]*)\"?.*/\1/p" "$2" | head -1; }
+fmt_date() { date -d "$1" '+%A %-d %B %Y at %H:%M' 2>/dev/null || echo "$1"; }
+case ${1:-} in
+  os)
+    . /etc/os-release 2>/dev/null
+    v=$(cat "$GRAPHITE_PATH/VERSION" 2>/dev/null)
+    echo "${NAME:-Linux}${v:+ $v}${BUILD_ID:+ ($BUILD_ID)}" ;;
+  theme) cat "$HOME/.config/graphite/theme" 2>/dev/null || echo graphite-teal ;;
+  browser)
+    b=$(xdg-settings get default-web-browser 2>/dev/null || xdg-mime query default x-scheme-handler/https 2>/dev/null)
+    b=${b%.desktop}; b=${b##*.}; echo "${b:-none set}" ;;
+  palette) # scheme name + one dot per palette colour, in the colour itself
+    d=$(theme_dir) || { na; exit 0; }
+    out="$(tval name "$d/colors.toml") ($(basename "$d")) "
+    for k in accent accent2 red green yellow blue magenta cyan; do
+      h=$(tval "$k" "$d/colors.toml"); h=${h#\#}; [[ $h =~ ^[0-9a-fA-F]{6}$ ]] || continue
+      out+=$(printf '\e[38;2;%d;%d;%dm●' 0x${h:0:2} 0x${h:2:2} 0x${h:4:2})
+    done
+    printf '%s\e[0m\n' "$out" ;;
+  age) # install date: root fs birth time, else the first pacman log entry
+    b=$(stat -c %W / 2>/dev/null); [[ $b =~ ^[0-9]+$ ]] && ((b > 1420070400)) || b=0
+    if ((b == 0)); then l=$(head -1 /var/log/pacman.log 2>/dev/null | sed -nE 's/^\[([^]]+)\].*/\1/p'); [[ -n $l ]] && b=$(date -d "$l" +%s 2>/dev/null); fi
+    [[ $b =~ ^[1-9][0-9]*$ ]] || { na; exit 0; }
+    d=$(( ($(date +%s) - b) / 86400 )); ((d == 1)) && echo "1 day" || echo "$d days" ;;
+  updated) # last full upgrade (pacman -Syu), else the last transaction
+    l=$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1)
+    [[ -n $l ]] || l=$(grep -a '\[ALPM\] transaction completed' /var/log/pacman.log 2>/dev/null | tail -1)
+    t=$(sed -nE 's/^\[([^]]+)\].*/\1/p' <<<"$l"); [[ -n $t ]] && fmt_date "$t" || echo never ;;
+  -h|--help) echo "usage: graphite-fetch [fastfetch args] | os|theme|browser|palette|age|updated" ;;
+  *) exec fastfetch "$@" ;;
+esac

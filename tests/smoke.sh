@@ -65,6 +65,7 @@ check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
 # desktop for the screenshots: fastfetch (logo) + a second tiled terminal
+check "fetch: config parses and prints the three sections" 'o=$(timeout 30 fastfetch --pipe true 2>&1 | sed "s/\x1b\[[0-9;]*m//g") && ! grep -qi "error" <<<"$o" && grep -q "─Hardware─" <<<"$o" && grep -q "─Software─" <<<"$o" && grep -q "─Age / Uptime / Update─" <<<"$o"'
 hyprctl dispatch exec "kitty -o font_size=8.5 --hold fastfetch" >/dev/null 2>&1; sleep 8
 hyprctl dispatch exec kitty >/dev/null 2>&1; sleep 8
 check "network: default route" 'ip route | grep -q "^default"'
