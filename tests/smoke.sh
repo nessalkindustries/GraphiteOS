@@ -253,4 +253,12 @@ echo "SMOKE: SHOT settings-about"; sleep 3
 timeout 20 graphite-settings close >/dev/null 2>&1
 for _ in $(seq 10); do ! timeout 10 hyprctl clients | grep -q "title: Graphite Settings" && break; sleep 3; done
 check "settings window closes" '! timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
+# GPU auto-setup (game-1): the VM's virtual GPU needs nothing; fixtures check the per-vendor plans
+check "gpu: status lists the VM's display controller" 'timeout 60 graphite gpu status | grep -q "^gpu 1:"'
+check "gpu: nothing to install for the virtual GPU" '[ "$(timeout 60 graphite gpu plan)" = "nothing to install" ]'
+fx=$(mktemp); printf '%s\n' '00:02.0 VGA compatible controller [0300]: Intel Corporation Alder Lake-P GT2 [Iris Xe Graphics] [8086:46a6] (rev 0c)' '	Kernel driver in use: i915' '01:00.0 3D controller [0302]: NVIDIA Corporation GA107M [GeForce RTX 3050 Mobile] [10de:25a2] (rev a1)' '	Kernel driver in use: nouveau' > "$fx"
+check "gpu: Intel + RTX laptop plan adds nvidia-open" 'p=$(GRAPHITE_LSPCI=$fx graphite gpu plan); grep -qE "^nvidia-open(-dkms)?$" <<<"$p" && grep -qx lib32-nvidia-utils <<<"$p" && ! grep -qx vulkan-nouveau <<<"$p"'
+printf '%s\n' '04:00.0 VGA compatible controller [0300]: NVIDIA Corporation GP106 [GeForce GTX 1060 6GB] [10de:1c03] (rev a1)' > "$fx"
+check "gpu: pre-Turing NVIDIA stays on nouveau" 'p=$(GRAPHITE_LSPCI=$fx graphite gpu status); grep -q "pre-Turing" <<<"$p" && ! grep -q nvidia-open <<<"$p"'
+rm -f "$fx"
 echo "SMOKE: DONE fails=$fails"

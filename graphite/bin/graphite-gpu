@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# GPU driver auto-setup (game-1): detect Intel/AMD/NVIDIA GPUs with lspci and install the
+# matching Mesa/Vulkan/VA-API or NVIDIA stack from the official repos.
+#   graphite gpu status              GPUs, kernel driver in use, installed/missing stack packages
+#   graphite gpu plan                packages 'setup' would install (no changes)
+#   graphite gpu setup [--yes]       install them (pacman --needed; asks for sudo)
+# NVIDIA: Turing (GTX 16xx / RTX 20xx) and newer get nvidia-open (nvidia-open-dkms + headers
+# when a kernel other than 'linux' is installed); older NVIDIA cards stay on nouveau (Mesa),
+# because their proprietary legacy drivers are not in the official repos.
+# GRAPHITE_LSPCI=<file> replaces `lspci -nnk` output (tests).
+set -uo pipefail
+lspci_out() { if [[ -n ${GRAPHITE_LSPCI:-} ]]; then cat "$GRAPHITE_LSPCI"; else lspci -nnk 2>/dev/null; fi; }
+installed() { pacman -Qq "$1" >/dev/null 2>&1; }
+
+# one line per display controller: VENDOR DEVICE DRIVER NAME...
+gpus() {
+  lspci_out | awk '
+    /^[0-9a-f]/ { if (dev) print v, d, (drv ? drv : "-"), name; dev = 0; drv = "" }
+    /^[0-9a-f].*\[03(00|02|80)\]/ {
+      dev = 1; match($0, /\[[0-9a-f]{4}:[0-9a-f]{4}\]/); id = substr($0, RSTART + 1, 9)
+      v = substr(id, 1, 4); d = substr(id, 6, 4); name = $0; sub(/^[^ ]+ [^:]*: /, "", name); sub(/ \[[0-9a-f]{4}:[0-9a-f]{4}\].*$/, "", name) }
+    dev && /Kernel driver in use:/ { drv = $NF }
+    END { if (dev) print v, d, (drv ? drv : "-"), name }'
+}
+vendor() { case $1 in 8086) echo intel ;; 1002|1022) echo amd ;; 10de) echo nvidia ;; *) echo other ;; esac; }
+# Turing and newer start at device 0x1e00 (TU102); GA/AD/GB are all higher
+nv_modern() { (( 16#$1 >= 16#1e00 )); }
+kernels() { local k; for k in linux linux-lts linux-zen linux-hardened; do installed "$k" && echo "$k"; done; }
+
+stack() {   # packages for one vendor (+ device id for NVIDIA)
+  case $1 in
+    intel) echo mesa lib32-mesa vulkan-intel lib32-vulkan-intel intel-media-driver vulkan-icd-loader lib32-vulkan-icd-loader ;;
+    amd) echo mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon libva-mesa-driver vulkan-icd-loader lib32-vulkan-icd-loader ;;
+    nvidia)
+      if nv_modern "$2"; then
+        local ks others=0 k; ks=$(kernels)
+        for k in $ks; do [[ $k == linux ]] || others=1; done
+        if ((others)); then echo nvidia-open-dkms; for k in $ks; do echo "$k-headers"; done
+        else echo nvidia-open; fi
+        echo nvidia-utils lib32-nvidia-utils nvidia-settings libva-nvidia-driver vulkan-icd-loader lib32-vulkan-icd-loader
+      else echo mesa lib32-mesa vulkan-nouveau lib32-vulkan-nouveau; fi ;;
+  esac
+}
+wanted() { local v d drv name; while read -r v d drv name; do stack "$(vendor "$v")" "$d"; done < <(gpus) | tr ' ' '\n' | awk 'NF && !s[$0]++'; }
+missing() { local p; for p in $(wanted); do installed "$p" || echo "$p"; done; }
+
+status() {
+  local n=0 v d drv name
+  while read -r v d drv name; do
+    n=$((n + 1)); echo "gpu $n:       $name"
+    echo "  vendor:    $(vendor "$v") [$v:$d]   driver in use: $drv"
+    [[ $(vendor "$v") == nvidia ]] && ! nv_modern "$d" && echo "  note:      pre-Turing NVIDIA: stays on nouveau (Mesa); legacy proprietary drivers are not in the official repos"
+  done < <(gpus)
+  ((n)) || echo "gpu:         none found by lspci"
+  local w m; w=$(wanted | tr '\n' ' '); m=$(missing | tr '\n' ' ')
+  echo "stack:       ${w:-nothing extra (generic/virtual GPU: Mesa software or virtio rendering)}"
+  echo "missing:     ${m:-none}"
+  echo "vulkan ICDs: $(find /usr/share/vulkan/icd.d -name '*.json' -printf '%f ' 2>/dev/null)"
+}
+
+case ${1:-status} in
+  status) status ;;
+  plan) m=$(missing); [[ -n $m ]] && echo "$m" || echo "nothing to install" ;;
+  setup)
+    yes=0; [[ ${2:-} == --yes || ${2:-} == -y ]] && yes=1
+    mapfile -t m < <(missing)
+    ((${#m[@]})) || { echo "GPU stack complete: nothing to install"; exit 0; }
+    echo "Will install: ${m[*]}"
+    if ((!yes)); then read -r -p "Proceed? [y/N] " a; [[ $a == [yY]* ]] || exit 1; fi
+    sudo pacman -S --needed --noconfirm "${m[@]}" || exit 1
+    if printf '%s\n' "${m[@]}" | grep -q '^nvidia'; then
+      echo "NVIDIA driver installed. Reboot to load it (nouveau is blacklisted by nvidia-utils)."
+    fi ;;
+  -h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1 ;;
+esac

@@ -3,7 +3,7 @@
 pkgbase=graphite-meta
 pkgname=(graphite-desktop graphite-gaming graphite-dev graphite-nvidia)
 pkgver=0.3.0
-pkgrel=8
+pkgrel=9
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"
 license=(MIT)
