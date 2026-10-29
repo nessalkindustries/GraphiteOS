@@ -307,4 +307,22 @@ check "theme store: rejects a bad name" '! graphite theme install ../etc 2>/dev/
 check "apps: curated list with states" '[ "$(graphite apps list --tsv | grep -cE "	(pacman|flatpak)	.*	(installed|available)$")" -ge 20 ]'
 check "apps: search finds a repo package" 'timeout 60 graphite apps search vlc --tsv | grep -q "^vlc	pacman	"'
 check "apps: rejects a bad id" '! graphite apps install "a;b" 2>/dev/null && ! graphite apps install no-such-package-xyz 2>/dev/null'
+# eco-4 graphical installer: backend validation + the window in test mode (never installs here)
+export GRAPHITE_INSTALLER_DIR=/tmp/gi-smoke
+check "installer: auto stays closed on an installed system" 'graphite-installer auto; sleep 3; ! pgrep -f "qs -c graphite-installer"'
+check "installer: lists the disk" 'graphite installer disks | grep -qE "^/dev/[a-z0-9]+	[0-9.]+[KMGT]	"'
+check "installer: rejects bad answers" 'printf "disk=/dev/nope\nuser=Root\npassword=\nluks=short\n" | graphite-installer answers | grep -c "^error" | grep -qx 4'
+check "installer: accepts good answers, file is 0600" 'd=$(graphite-installer disks | head -1 | cut -f1); printf "disk=$d\nuser=tester\npassword=x\nluks=12345678\ntimezone=UTC\nprofile=full\n" | graphite-installer answers | grep -qx ok && [ "$(stat -c %a /tmp/gi-smoke/answers)" = 600 ] && [ "$(graphite-installer status | head -1)" = state=idle ]'
+graphite-installer open; sleep 8
+check "installer: window opens" 'timeout 10 hyprctl clients | grep -q "title: Install Graphite"'
+timeout 10 qs ipc -c graphite-installer call installer testMode >/dev/null 2>&1
+timeout 10 qs ipc -c graphite-installer call installer step 1 >/dev/null 2>&1; sleep 3
+echo "SMOKE: SHOT installer-disk"; sleep 3
+check "installer: window sees disks" '[ "$(timeout 10 qs ipc -c graphite-installer call installer diskCount)" -ge 1 ]'
+timeout 10 qs ipc -c graphite-installer call installer fill "$(graphite-installer disks | head -1 | cut -f1)" tester pw 12345678 >/dev/null 2>&1
+timeout 10 qs ipc -c graphite-installer call installer step 5 >/dev/null 2>&1; sleep 2
+echo "SMOKE: SHOT installer-summary"; sleep 2
+timeout 10 qs ipc -c graphite-installer call installer confirm >/dev/null 2>&1; sleep 4
+check "installer: summary validates without installing (test mode)" 'timeout 10 qs ipc -c graphite-installer call installer error | grep -q "test mode" && [ "$(graphite-installer status | head -1)" = state=idle ] && ! pgrep -f graphite-iso-install'
+graphite-installer close; sleep 2; rm -rf /tmp/gi-smoke; unset GRAPHITE_INSTALLER_DIR
 echo "SMOKE: DONE fails=$fails"

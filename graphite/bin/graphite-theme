@@ -59,6 +59,8 @@ render() {
   cp -f "$OUT/quickshell-colors.qml" "$HOME/.config/quickshell/graphite-settings/Colors.qml"
   mkdir -p "$HOME/.config/quickshell/graphite-firstboot"  # desk-7 first-boot setup too
   cp -f "$OUT/quickshell-colors.qml" "$HOME/.config/quickshell/graphite-firstboot/Colors.qml"
+  mkdir -p "$HOME/.config/quickshell/graphite-installer"  # eco-4 graphical installer
+  cp -f "$OUT/quickshell-colors.qml" "$HOME/.config/quickshell/graphite-installer/Colors.qml"
   mv -f "$OUT/quickshell-colors.qml" "$HOME/.config/quickshell/graphite-bar/Colors.qml"
   mv -f "$OUT/qt6ct.conf" "$HOME/.config/qt6ct/qt6ct.conf"
   cp -f "$OUT/gtk-settings.ini" "$HOME/.config/gtk-3.0/settings.ini"

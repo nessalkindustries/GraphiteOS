@@ -1,5 +1,5 @@
 Welcome to the Graphite live system.
 
-Install Graphite to disk:   sudo graphite-iso-install
+Install Graphite to disk:   the "Install Graphite" window, or: sudo graphite-iso-install
 Graphite command center:    graphite help
 Wi-Fi: iwctl  ·  Arch install guide: Installation_guide
