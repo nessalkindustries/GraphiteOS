@@ -208,9 +208,26 @@ if not NO_SMOKE and any("SELFTEST: ALL DONE" in open(f, errors="replace").read()
         if "login:" in text and "t" not in st:
             st["t"] = time.monotonic()
         # smoke tests: log in on the serial getty (desktop autologin runs on tty1) and run smoke.sh
-        if "t" in st and "smoke" not in st and time.monotonic() - st["t"] > 150:
-            st["smoke"] = 1; send(p, "tester\r"); time.sleep(4); send(p, "graphite-test\r"); time.sleep(6)
-            send(p, f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.monotonic()
+        # serial login, prompt-driven: on a slow VM a fixed sleep typed the password before login's
+        # "Password:" prompt (login flushes typeahead), giving "Login incorrect" and no smoke (h27)
+        now = time.monotonic()
+        if "t" in st and "smoke" not in st and now - st["t"] > 150:
+            tail = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)[-400:].rstrip()
+            lg = st.get("lg", "idle")
+            if lg == "idle" or (lg in ("user", "pw") and now - st["lg_t"] > 120):
+                if st.get("lg_n", 0) >= 8:
+                    st["smoke"] = 1; note("SMOKE: FAIL serial login never succeeded")
+                else:
+                    if lg != "idle": note(f"serial login retry ({lg} stage stalled)")
+                    send(p, "tester\r"); st["lg"] = "user"; st["lg_t"] = now; st["lg_n"] = st.get("lg_n", 0) + 1
+            elif lg == "user" and tail.endswith("Password:"):
+                send(p, "graphite-test\r"); st["lg"] = "pw"; st["lg_t"] = now
+            elif lg == "pw":
+                after = tail.rsplit("Password:", 1)[-1]
+                if tail.endswith("login:") or "Login incorrect" in after:
+                    note("serial login: incorrect/reprompt, retrying"); st["lg"] = "idle"
+                elif now - st["lg_t"] > 30:
+                    st["smoke"] = 1; send(p, f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.monotonic()
         for m in re.findall(r"@SMOKE: ([^\r\n]*)[\r\n]", text):
             if ("sm", m) not in st: st[("sm", m)] = 1; note("SMOKE: " + m)
             if m.startswith("SHOT ") and ("shotx", m) not in st:
