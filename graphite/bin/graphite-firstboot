@@ -6,7 +6,7 @@
 #   graphite-firstboot finish            mark done (the window's Finish/Skip buttons)
 #   graphite-firstboot wallpapers        bundled wallpapers, one path per line
 #   graphite-firstboot privacy [get|set KEY on|off]   news, clipboard, recent
-#   graphite-firstboot profiles          NAME=installed|available (gaming, dev, nvidia)
+#   graphite-firstboot profiles          NAME=installed|available (gaming, creator, dev, nvidia)
 #   graphite-firstboot profile NAME      install graphite-NAME in a terminal (asks for sudo)
 #   graphite-firstboot secureboot        one-line Secure Boot summary
 set -uo pipefail
@@ -56,10 +56,10 @@ case ${1:-open} in
       set) pset "${3:?key}" "${4:?on|off}" ;;
       *) echo "usage: graphite-firstboot privacy [get|set KEY on|off]" >&2; exit 1 ;;
     esac ;;
-  profiles) for p in gaming dev nvidia; do pacman -Qq "graphite-$p" >/dev/null 2>&1 && echo "$p=installed" || echo "$p=available"; done ;;
+  profiles) for p in gaming creator dev nvidia; do pacman -Qq "graphite-$p" >/dev/null 2>&1 && echo "$p=installed" || echo "$p=available"; done ;;
   profile)
-    p=${2:?usage: graphite-firstboot profile gaming|dev|nvidia}
-    [[ $p =~ ^(gaming|dev|nvidia)$ ]] || { echo "unknown profile: $p" >&2; exit 1; }
+    p=${2:?usage: graphite-firstboot profile gaming|creator|dev|nvidia}
+    [[ $p =~ ^(gaming|creator|dev|nvidia)$ ]] || { echo "unknown profile: $p" >&2; exit 1; }
     setsid -f kitty --title "Graphite: install $p profile" sh -c "sudo pacman -S --needed graphite-$p; echo; read -r -p 'Press Enter to close' _" >/dev/null 2>&1 ;;
   secureboot)
     s=$(graphite-secureboot status 2>/dev/null)

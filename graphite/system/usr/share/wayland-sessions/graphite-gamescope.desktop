@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Steam (gamescope)
+Comment=Steam Big Picture in a gamescope session (graphite-gaming)
+Exec=gamescope -e -f -- steam -gamepadui -steamos3
+Type=Application
+DesktopNames=gamescope

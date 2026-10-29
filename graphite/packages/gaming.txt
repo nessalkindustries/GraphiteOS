@@ -6,3 +6,5 @@ lib32-mangohud
 lutris
 wine
 winetricks
+# gamescope session (game-4): Steam Big Picture in its own compositor, picked in SDDM
+gamescope

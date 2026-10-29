@@ -117,7 +117,7 @@ ShellRoot {
                 // 4. Profiles
                 ColumnLayout { anchors.fill: parent; visible: root.step === 3; spacing: 14
                     Text { text: "Optional package profiles from the signed Graphite repo. Installing opens a terminal and asks for your password."; color: Colors.muted; font.pixelSize: 14; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    Repeater { model: [["gaming", "Gaming", "Steam, gamemode, MangoHud, Wine/Proton helpers"], ["dev", "Developer", "compilers, containers, editors"], ["nvidia", "NVIDIA", "proprietary NVIDIA driver stack (only for NVIDIA GPUs)"]]
+                    Repeater { model: [["gaming", "Gaming", "Steam, gamemode, MangoHud, Wine/Proton, gamescope session"], ["creator", "Creator", "OBS Studio, screen capture, hardware encoding"], ["dev", "Developer", "compilers, containers, editors"], ["nvidia", "NVIDIA", "proprietary NVIDIA driver stack (only for NVIDIA GPUs)"]]
                         RowLayout { required property var modelData; Layout.fillWidth: true; spacing: 16
                             ColumnLayout { Layout.fillWidth: true; spacing: 2
                                 Text { text: modelData[1]; color: Colors.foreground; font.pixelSize: 15 }
