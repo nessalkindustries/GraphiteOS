@@ -315,6 +315,8 @@ check "installer: lists the disk" 'graphite installer disks | grep -qE "^/dev/[a
 check "installer: rejects bad answers" 'printf "disk=/dev/nope\nuser=Root\npassword=\nluks=short\n" | graphite-installer answers | grep -c "^error" | grep -qx 4'
 check "installer: accepts good answers, file is 0600" 'd=$(graphite-installer disks | head -1 | cut -f1); printf "disk=$d\nuser=tester\npassword=x\nluks=12345678\ntimezone=UTC\nprofile=full\n" | graphite-installer answers | grep -qx ok && [ "$(stat -c %a /tmp/gi-smoke/answers)" = 600 ] && [ "$(graphite-installer status | head -1)" = state=idle ]'
 graphite-installer open; sleep 8
+# slow TCG VMs can take 30s+ to map the window and start the IPC server
+for _ in $(seq 1 30); do timeout 10 hyprctl clients | grep -q "title: Install Graphite" && timeout 10 qs ipc -c graphite-installer call installer diskCount >/dev/null 2>&1 && break; sleep 2; done
 check "installer: window opens" 'timeout 10 hyprctl clients | grep -q "title: Install Graphite"'
 timeout 10 qs ipc -c graphite-installer call installer testMode >/dev/null 2>&1
 timeout 10 qs ipc -c graphite-installer call installer step 1 >/dev/null 2>&1; sleep 3
