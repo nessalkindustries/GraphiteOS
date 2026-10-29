@@ -250,6 +250,9 @@ echo "SMOKE: SHOT settings"; sleep 5
 check "settings window opens" 'timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
 timeout 10 qs ipc -c graphite-settings call settings page about >/dev/null 2>&1; sleep 3
 echo "SMOKE: SHOT settings-about"; sleep 3
+timeout 10 qs ipc -c graphite-settings call settings page store >/dev/null 2>&1; sleep 5
+check "settings: theme store page opens" '[ "$(timeout 10 qs ipc -c graphite-settings call settings current 2>/dev/null)" = store ]'
+echo "SMOKE: SHOT settings-store"; sleep 3
 timeout 20 graphite-settings close >/dev/null 2>&1
 for _ in $(seq 10); do ! timeout 10 hyprctl clients | grep -q "title: Graphite Settings" && break; sleep 3; done
 check "settings window closes" '! timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
@@ -293,4 +296,8 @@ check "profile: rejects an unknown profile" '! graphite profile plan bogus 2>/de
 check "sync: export, import restores and backs up" 'd=$(mktemp -d) && graphite sync export $d/s.tar.gz >/dev/null && tar -tzf $d/s.tar.gz | grep -q "^hypr/hyprland.conf" && ! tar -tzf $d/s.tar.gz | grep -qE "(^|/)(\.ssh|\.gnupg|keyrings)/" && cp ~/.config/hypr/hyprland.conf $d/orig && echo "# sync-test" >> ~/.config/hypr/hyprland.conf && graphite sync import $d/s.tar.gz --yes >/dev/null && cmp -s ~/.config/hypr/hyprland.conf $d/orig && ls ~/.local/state/graphite/sync-backup-*.tar.gz'
 check "sync: git export commits" '! command -v git || { d=$(mktemp -d) && graphite sync export --git $d/repo >/dev/null && [ "$(git -C $d/repo rev-list --count HEAD)" = 1 ] && [ -f $d/repo/config/hypr/hyprland.conf ]; }'
 check "sync: import refuses a folder without settings" '! graphite sync import "$(mktemp -d)" --yes 2>/dev/null'
+# theme store (eco-2): graphite-theme-* packages in the signed repo
+check "theme store: browse lists the store themes" '[ "$(timeout 30 graphite theme browse --tsv | grep -cE "^graphite-(gruvbox|rosepine|solarized)[[:space:]].+[[:space:]](installed|available)$")" = 3 ]'
+check "theme store: store themes are not installed by default" '! graphite theme list | grep -q gruvbox'
+check "theme store: rejects a bad name" '! graphite theme install ../etc 2>/dev/null && ! graphite theme install graphite-nosuch 2>/dev/null'
 echo "SMOKE: DONE fails=$fails"

@@ -1,0 +1,20 @@
+# shellcheck shell=bash disable=SC2034,SC2154
+# Theme store packages (eco-2): one graphite-theme-NAME package per graphite/store/themes/graphite-NAME.
+# The signed repo database is the store index: `graphite theme browse` reads it with pacman.
+pkgbase=graphite-themes
+pkgname=(graphite-theme-gruvbox graphite-theme-rosepine graphite-theme-solarized)
+pkgver=0.3.0
+pkgdesc="Graphite store themes"
+pkgrel=1
+arch=(any)
+url="https://github.com/Skeleten80/GraphiteOS"
+license=(MIT)
+_one() {
+  local d="${GRAPHITE_SRC:-$startdir/../..}/store/themes/graphite-$1"
+  pkgdesc="Graphite theme: $(sed -n 's/^description *= *"\(.*\)"/\1/p' "$d/colors.toml")"
+  depends=(graphite-config)
+  install -Dm644 "$d/colors.toml" "$pkgdir/usr/share/graphite/themes/graphite-$1/colors.toml"
+}
+package_graphite-theme-gruvbox() { _one gruvbox; }
+package_graphite-theme-rosepine() { _one rosepine; }
+package_graphite-theme-solarized() { _one solarized; }

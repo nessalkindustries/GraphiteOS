@@ -25,7 +25,7 @@ run() { if [[ $EUID -eq 0 ]]; then runuser -u builder -- "$@"; else "$@"; fi; }
 if [[ $EUID -eq 0 ]]; then id builder >/dev/null 2>&1 || useradd -m builder; chown -R builder "$WORK"; fi
 # GRAPHITE_PKGREL_BUMP=N: append .N to every pkgrel (test builds of a "newer" repo: tests/qemu-install.py)
 if [[ -n ${GRAPHITE_PKGREL_BUMP:-} ]]; then sed -i -E "s/^pkgrel=([0-9]+)$/pkgrel=\\1.$GRAPHITE_PKGREL_BUMP/" "$WORK"/graphite/pkgs/*/PKGBUILD; fi
-pkgs=(graphite-config graphite-meta)
+pkgs=(graphite-config graphite-meta graphite-themes)
 if [[ -n ${GRAPHITE_SIGN_KEY:-} ]]; then
   # graphite-keyring: the signing key + any extra public keys in keys/*.asc (rotation)
   KR="$WORK/keyring"; mkdir -p "$KR"

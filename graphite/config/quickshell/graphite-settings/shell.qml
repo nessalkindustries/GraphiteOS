@@ -1,4 +1,4 @@
-// Graphite Settings (desk-6): appearance, display, input, network, about.
+// Graphite Settings (desk-6): appearance, display, input, network, about; theme store (eco-2).
 // Run with `graphite-settings` (Super+I). Every read and write goes through the
 // graphite-settings backend, so this window and `graphite settings` always agree.
 // Window class/title "Graphite Settings"; IPC target "settings" (show/quit/page).
@@ -13,6 +13,7 @@ ShellRoot {
     property var about: ({})
     property var themes: []
     property var nets: []
+    property var store: []
     property string page: "appearance"
     property string msg: ""
 
@@ -36,10 +37,13 @@ ShellRoot {
         stderr: StdioCollector { onStreamFinished: if (this.text.length) root.msg = this.text.trim() }
         onExited: (code) => { if (code === 0) root.msg = "Saved"; root.refresh(); } }
     Process { id: runP }
+    Process { id: storeP; command: ["graphite-theme", "browse", "--tsv"]
+        stdout: StdioCollector { onStreamFinished: root.store = this.text.split("\n").filter(l => l.length > 0).map(l => l.split("\t")) } }
+    function openStore() { storeP.running = true; themeP.running = true; }
 
     IpcHandler {
         target: "settings"
-        function page(name: string): void { root.page = name; }
+        function page(name: string): void { root.page = name; if (name === "store") root.openStore(); }
         function current(): string { return root.page; }
         function quit(): void { Qt.quit(); }
     }
@@ -79,7 +83,7 @@ ShellRoot {
                     anchors { fill: parent; margins: 12 } spacing: 4
                     Text { text: "Settings"; color: Colors.muted; font.pixelSize: 12; Layout.bottomMargin: 6 }
                     Repeater {
-                        model: [["appearance", "Appearance"], ["display", "Display"], ["input", "Input"], ["network", "Network"], ["about", "About"]]
+                        model: [["appearance", "Appearance"], ["display", "Display"], ["input", "Input"], ["network", "Network"], ["store", "Theme store"], ["about", "About"]]
                         Rectangle {
                             required property var modelData
                             Layout.fillWidth: true; implicitHeight: 36; radius: 8
@@ -88,7 +92,7 @@ ShellRoot {
                                    text: modelData[1]; font.pixelSize: 14
                                    color: root.page === modelData[0] ? Colors.accent : Colors.foreground }
                             MouseArea { id: nm; anchors.fill: parent; hoverEnabled: true
-                                onClicked: { root.page = modelData[0]; if (modelData[0] === "network") netP.running = true; } }
+                                onClicked: { root.page = modelData[0]; if (modelData[0] === "network") netP.running = true; if (modelData[0] === "store") root.openStore(); } }
                         }
                     }
                     Item { Layout.fillHeight: true }
@@ -140,6 +144,20 @@ ShellRoot {
                         Text { required property var modelData
                                text: (modelData[0] === "*" ? "● " : "   ") + (modelData[1] || "(hidden)") + "   " + (modelData[2] || "") + "%  " + (modelData[3] || "")
                                color: modelData[0] === "*" ? Colors.accent : Colors.foreground; font.pixelSize: 13 } } }
+
+                // Theme store: graphite-theme-* packages from the signed Graphite repo
+                Head { text: "Theme store"; visible: root.page === "store" }
+                Text { visible: root.page === "store"; text: root.store.length ? "Themes from the signed Graphite repo. Installing opens a terminal and asks for your password." : "No store themes found (run sudo pacman -Sy)."
+                       color: Colors.muted; font.pixelSize: 13; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Repeater { model: root.store
+                    RowLayout { required property var modelData; visible: root.page === "store"; Layout.fillWidth: true; spacing: 16
+                        ColumnLayout { Layout.fillWidth: true; spacing: 2
+                            Text { text: modelData[0]; color: Colors.foreground; font.pixelSize: 15 }
+                            Text { text: modelData[1] || ""; color: Colors.muted; font.pixelSize: 12 } }
+                        Btn { visible: modelData[2] !== "installed"; label: "Install"
+                              onClicked: { runP.command = ["kitty", "--title", "Graphite: install theme", "sh", "-c", "graphite-theme install " + modelData[0] + " --set; echo; read -r -p 'Press Enter to close' _"]; runP.running = true; root.msg = "Opening a terminal…"; } }
+                        Btn { visible: modelData[2] === "installed"; label: root.st.theme === modelData[0] ? "In use" : "Use"; on: root.st.theme === modelData[0]
+                              onClicked: root.set("theme", modelData[0]) } } }
 
                 // About
                 Head { text: "About"; visible: root.page === "about" }
