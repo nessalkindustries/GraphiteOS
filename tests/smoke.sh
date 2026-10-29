@@ -261,4 +261,12 @@ check "gpu: Intel + RTX laptop plan adds nvidia-open" 'p=$(GRAPHITE_LSPCI=$fx gr
 printf '%s\n' '04:00.0 VGA compatible controller [0300]: NVIDIA Corporation GP106 [GeForce GTX 1060 6GB] [10de:1c03] (rev a1)' > "$fx"
 check "gpu: pre-Turing NVIDIA stays on nouveau" 'p=$(GRAPHITE_LSPCI=$fx graphite gpu status); grep -q "pre-Turing" <<<"$p" && ! grep -q nvidia-open <<<"$p"'
 rm -f "$fx"
+# low-latency audio (game-2): PipeWire picks up the preset after the user services restart
+aq() { for _ in $(seq 20); do v=$(timeout 10 pw-metadata -n settings 0 clock.quantum 2>/dev/null | sed -n "s/.*value:'\([0-9]*\)'.*/\1/p"); [ "$v" = "$1" ] && return 0; sleep 3; done; echo "SMOKE: diag audio quantum=[$v] want $1"; return 1; }
+check "audio: rtkit and the realtime group are set up" 'pacman -Qq rtkit realtime-privileges && id -nG | grep -qw realtime'
+check "audio: lowlatency preset sets PipeWire quantum 64" 'timeout 150 graphite audio lowlatency >/dev/null && aq 64'
+echo "SMOKE: diag audio: $(timeout 60 graphite audio status 2>&1 | head -2 | tr '\n' ' ')"
+check "audio: status reports the preset" 'timeout 60 graphite audio status | grep -q "preset:   lowlatency (quantum 64)"'
+check "audio: default preset restores quantum 1024" 'timeout 150 graphite audio default >/dev/null && aq 1024 && [ ! -f ~/.config/pipewire/pipewire.conf.d/90-graphite-latency.conf ]'
+check "audio: rejects a bad quantum" '! graphite audio lowlatency 7 2>/dev/null'
 echo "SMOKE: DONE fails=$fails"
