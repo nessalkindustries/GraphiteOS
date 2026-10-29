@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2154  # S_* are set via declare in write()
+# Graphite settings backend + launcher (desk-6). The Settings app (Quickshell, Super+I) and
+# `graphite settings` both go through this script, so they read and write the same files:
+#   appearance -> graphite-theme / graphite bar      (~/.config/graphite/theme, .../bar)
+#   display/input -> ~/.config/graphite/settings.conf (Hyprland syntax, sourced by hyprland.conf)
+#   network -> NetworkManager (nmcli), about -> os-release / pacman
+# Usage: graphite-settings [open|close|toggle] | init | get [KEY] | set KEY VALUE | keys | wifi-list | about
+set -uo pipefail
+CONF="$HOME/.config/graphite/settings.conf"
+declare -A DEF=([scale]=auto [kb_layout]=us [kb_variant]="" [sensitivity]=0 [natural_scroll]=true [follow_mouse]=1)
+
+val() {  # current stored value or default
+  local k=$1 v
+  v=$(sed -n "s/^# graphite: $k = \(.*\)$/\1/p" "$CONF" 2>/dev/null | tail -1)
+  [[ -n $v ]] && { [[ $v == '""' ]] && v=""; echo "$v"; } || echo "${DEF[$k]}"
+}
+write() {  # regenerate settings.conf from the stored values (+ one override)
+  local ok=$1 ov=$2 k v tmp
+  mkdir -p "${CONF%/*}"; tmp=$(mktemp "$CONF.XXXX")
+  { echo "# Written by graphite-settings (Settings app / \`graphite settings set\`). Edit with those."
+    for k in scale kb_layout kb_variant sensitivity natural_scroll follow_mouse; do
+      v=$(val "$k"); [[ $k == "$ok" ]] && v=$ov; echo "# graphite: $k = ${v:-\"\"}"; declare -g "S_$k=$v"
+    done
+    [[ $S_scale == auto ]] && echo "monitor = ,preferred,auto,1" || echo "monitor = ,preferred,auto,$S_scale"
+    echo "input {"
+    echo "    kb_layout = $S_kb_layout"; echo "    kb_variant = $S_kb_variant"
+    echo "    sensitivity = $S_sensitivity"; echo "    follow_mouse = $S_follow_mouse"
+    echo "    touchpad {"; echo "        natural_scroll = $S_natural_scroll"; echo "    }"
+    echo "}"; } > "$tmp" && mv -f "$tmp" "$CONF"
+}
+valid() {
+  case $1 in
+    scale) [[ $2 == auto || $2 =~ ^(0\.5|0\.75|1|1\.25|1\.5|1\.75|2|2\.5|3)$ ]] ;;
+    kb_layout) [[ $2 =~ ^[a-z]{2,3}(,[a-z]{2,3})*$ ]] ;;
+    kb_variant) [[ $2 =~ ^[a-z0-9_,-]*$ ]] ;;
+    sensitivity) [[ $2 =~ ^-?(0(\.[0-9]+)?|1(\.0+)?)$ ]] ;;
+    natural_scroll) [[ $2 == true || $2 == false ]] ;;
+    follow_mouse) [[ $2 =~ ^[0-3]$ ]] ;;
+    *) return 1 ;;
+  esac
+}
+# Apply one changed key live with `hyprctl keyword` (cheap; settings.conf keeps it across
+# reloads/logins). A full `hyprctl reload` re-applies monitors, theme and animations and can
+# take longer than any sane timeout on a slow machine, so it is only the fallback.
+apply() {
+  local k=$1 v=$2 kw
+  case $k in
+    sensitivity|follow_mouse|kb_layout) kw="input:$k $v" ;;
+    natural_scroll) kw="input:touchpad:natural_scroll $v" ;;
+    kb_variant) [[ -n $v ]] && kw="input:kb_variant $v" ;;
+    scale) kw="monitor ,preferred,auto,$([[ $v == auto ]] && echo 1 || echo "$v")" ;;
+  esac
+  if [[ -n ${kw:-} ]] && timeout 30 hyprctl keyword $kw 2>/dev/null | grep -qx ok; then return 0; fi
+  timeout 60 hyprctl reload config-only >/dev/null 2>&1 || true
+}
+
+case ${1:-open} in
+  open|toggle|close)
+    if [[ $1 != open ]] && pgrep -f 'qs -c graphite-settings' >/dev/null; then pkill -f 'qs -c graphite-settings'; exit 0; fi
+    [[ $1 == close ]] && exit 0
+    pgrep -f 'qs -c graphite-settings' >/dev/null && exit 0
+    setsid -f qs -c graphite-settings >/dev/null 2>&1 ;;
+  init) [[ -f $CONF ]] || write "" "" ;;   # defaults, so hyprland.conf's source line always resolves
+  keys) printf '%s\n' scale kb_layout kb_variant sensitivity natural_scroll follow_mouse ;;
+  get)
+    if [[ -n ${2:-} ]]; then [[ -v DEF[$2] ]] || { echo "unknown key: $2" >&2; exit 1; }; val "$2"; exit; fi
+    for k in scale kb_layout kb_variant sensitivity natural_scroll follow_mouse; do echo "$k=$(val $k)"; done
+    echo "theme=$(graphite-theme current 2>/dev/null)"
+    echo "bar=$(cat "$HOME/.config/graphite/bar" 2>/dev/null || echo quickshell)"
+    echo "wifi=$(timeout 10 nmcli radio wifi 2>/dev/null || echo unknown)" ;;
+  set)
+    k=${2:?usage: graphite-settings set KEY VALUE}; v=${3-}
+    case $k in
+      theme) exec graphite-theme set "$v" ;;
+      bar) exec graphite bar "$v" ;;
+      wifi) exec graphite-control wifi "$v" ;;
+    esac
+    [[ -v DEF[$k] ]] || { echo "unknown key: $k" >&2; exit 1; }
+    valid "$k" "$v" || { echo "invalid value for $k: $v" >&2; exit 1; }
+    write "$k" "$v"; apply "$k" "$v"; echo "$k=$v" ;;
+  wifi-list) timeout 20 nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | head -20 ;;
+  about)
+    . /etc/os-release 2>/dev/null
+    echo "os=${PRETTY_NAME:-Graphite}"; echo "version=$(pacman -Q graphite-config 2>/dev/null | cut -d' ' -f2)"
+    echo "kernel=$(uname -r)"; echo "host=$(cat /etc/hostname 2>/dev/null)"
+    echo "cpu=$(sed -n 's/^model name\s*: //p' /proc/cpuinfo | head -1)"
+    echo "memory=$(free -h | awk '/^Mem:/{print $2}')"
+    echo "gpu=$(lspci 2>/dev/null | grep -iE 'vga|3d|display' | head -1 | cut -d: -f3- | sed 's/^ //')" ;;
+  *) echo "usage: graphite-settings [open|close|toggle] | get [KEY] | set KEY VALUE | keys | wifi-list | about" >&2; exit 1 ;;
+esac

@@ -89,6 +89,8 @@ fi
 A="$PROFILE/airootfs"
 mkdir -p "$A/opt"
 cp -a graphite "$A/opt/graphite"
+# installer installs from the same archive day (graphite-iso-install)
+if [ -n "$GRAPHITE_SNAPSHOT" ]; then echo "$GRAPHITE_SNAPSHOT" > "$A/opt/graphite/snapshot"; fi
 cp -aL "$OUT/graphite-repo" "$A/opt/graphite-repo"
 # mkarchiso resets airootfs modes to 0644 unless listed in file_permissions, so
 # register every executable in graphite/ (install.sh, bin/*, scripts) as 0755.
