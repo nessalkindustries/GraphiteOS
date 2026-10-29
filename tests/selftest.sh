@@ -44,6 +44,9 @@ common_checks() {
   check "user theme files generated" "test -f /home/$U/.config/graphite/current/hyprland.conf"
   check "os-release says Graphite (ID=graphite, ID_LIKE=arch)" '( . /etc/os-release; [[ $ID == graphite && $ID_LIKE == arch ]] )'
   check "filesystem package files intact (pacman -Qk)" 'pacman -Qk filesystem'
+  # TEMPORARY until the hyprland.lua port: the 0.56 stack is held (Hyprland 0.57 drops hyprland.conf)
+  check "hyprland < 0.57 and held via IgnorePkg (hyprland.conf still supported)" '[ "$(vercmp "$(pacman -Q hyprland | cut -d" " -f2)" 0.57)" -lt 0 ] && grep -Eq "^IgnorePkg.* hyprland( |$)" /etc/pacman.conf'
+  check "installed from the ISO's archive snapshot, updates back on the mirrorlist" '! grep -q "^Server = https://archive.archlinux.org" /etc/pacman.conf'
   check "portals installed" 'pacman -Q xdg-desktop-portal-hyprland xdg-desktop-portal-gtk'
   # milestone base-1: opt-in Secure Boot tooling, signed repo, build manifest
   say "diag secureboot: $(graphite secureboot status 2>&1 | tr '\n' ';')"
