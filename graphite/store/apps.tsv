@@ -1,0 +1,25 @@
+# Curated apps for Settings > Apps (eco-3): id<TAB>source<TAB>category<TAB>name<TAB>description
+# source: pacman (official Arch repos) or flatpak (Flathub, needs 'graphite apps flathub' once)
+firefox	pacman	Internet	Firefox	web browser
+chromium	pacman	Internet	Chromium	web browser
+thunderbird	pacman	Internet	Thunderbird	email and calendar
+discord	pacman	Internet	Discord	voice and text chat
+telegram-desktop	pacman	Internet	Telegram	messaging
+transmission-gtk	pacman	Internet	Transmission	BitTorrent client
+libreoffice-fresh	pacman	Office	LibreOffice	office suite
+keepassxc	pacman	Office	KeePassXC	offline password manager
+gimp	pacman	Graphics	GIMP	image editor
+inkscape	pacman	Graphics	Inkscape	vector graphics
+krita	pacman	Graphics	Krita	digital painting
+blender	pacman	Graphics	Blender	3D creation suite
+vlc	pacman	Media	VLC	media player
+mpv	pacman	Media	mpv	minimal video player
+audacity	pacman	Media	Audacity	audio editor
+kdenlive	pacman	Media	Kdenlive	video editor
+obs-studio	pacman	Media	OBS Studio	recording and streaming
+steam	pacman	Games	Steam	game store and launcher
+lutris	pacman	Games	Lutris	game launcher (Wine, emulators)
+code	pacman	Development	Code - OSS	code editor
+com.spotify.Client	flatpak	Media	Spotify	music streaming
+com.github.tchx84.Flatseal	flatpak	System	Flatseal	Flatpak permissions
+md.obsidian.Obsidian	flatpak	Office	Obsidian	notes

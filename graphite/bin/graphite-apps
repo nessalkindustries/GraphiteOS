@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# App store backend (eco-3) for Settings > Apps: curated list + search over the official Arch
+# repos (pacman) and, once enabled, Flathub (flatpak --user). No accounts, no tracking.
+#   graphite apps list [--tsv]          curated apps with installed/available state
+#   graphite apps search TEXT [--tsv]   search pacman (and Flathub when enabled)
+#   graphite apps install ID            pacman package (asks for sudo) or Flatpak app id
+#   graphite apps remove ID
+#   graphite apps flathub               install flatpak and add the Flathub remote (per user)
+#   graphite apps status                pacman/flatpak availability
+# --tsv rows: id<TAB>source<TAB>category<TAB>name<TAB>description<TAB>installed|available
+set -uo pipefail
+LIST=${GRAPHITE_APPS:-/usr/share/graphite/store/apps.tsv}
+help() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
+has_flathub() { command -v flatpak >/dev/null && flatpak remotes --user 2>/dev/null | grep -q '^flathub'; }
+pk_inst() { pacman -Qq "$1" >/dev/null 2>&1; }
+fp_inst() { command -v flatpak >/dev/null && flatpak info --user "$1" >/dev/null 2>&1; }
+state() { if [[ $2 == flatpak ]]; then fp_inst "$1"; else pk_inst "$1"; fi && echo installed || echo available; }
+is_flatpak_id() { [[ $1 =~ ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){2,}$ ]]; }
+valid() { [[ $1 =~ ^[A-Za-z0-9@._+-]+$ && $1 != -* ]] || { echo "bad app id: $1" >&2; exit 1; }; }
+show() {  # TSV on stdin -> table or TSV
+  if [[ $1 == --tsv ]]; then cat; else awk -F'\t' '{printf "%-28s %-8s %-10s %s\n", $1, $2, $6, $5}'; fi
+}
+sudo_() { if ((EUID == 0)); then "$@"; else sudo "$@"; fi; }
+
+case ${1:-list} in
+  list)
+    grep -v '^#' "$LIST" | while IFS=$'\t' read -r id src cat name desc; do
+      [[ -n $id ]] && printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$src" "$cat" "$name" "$desc" "$(state "$id" "$src")"
+    done | show "${2:-}" ;;
+  search)
+    q=${2:?usage: graphite apps search TEXT}; [[ ${#q} -ge 2 ]] || { echo "search needs 2+ characters" >&2; exit 1; }
+    { pacman -Ss -- "$q" 2>/dev/null | awk -v OFS='\t' '
+        /^[^ ]/ { split($1, a, "/"); id = a[2]; inst = ($0 ~ /\[installed/) ? "installed" : "available"; next }
+        { sub(/^ +/, ""); print id, "pacman", a[1], id, $0, inst }' |
+        awk -F'\t' -v q="${q,,}" '{ r = ($1 == q) ? 0 : (index($1, q) == 1 ? 1 : (index($1, q) ? 2 : 3)); print r "\t" $0 }' |
+        sort -t$'\t' -k1,1n -s | cut -f2- | head -40
+      if has_flathub; then
+        flatpak search --user --columns=application,name,description -- "$q" 2>/dev/null | head -20 |
+          while IFS=$'\t' read -r id name desc; do [[ $id == *.* ]] && printf '%s\tflatpak\tFlathub\t%s\t%s\t%s\n' "$id" "$name" "$desc" "$(state "$id" flatpak)"; done
+      fi; } | show "${3:-}" ;;
+  install|remove)
+    id=${2:?usage: graphite apps $1 ID}; valid "$id"
+    if is_flatpak_id "$id" && ! pacman -Si "$id" >/dev/null 2>&1; then
+      has_flathub || { echo "Flathub is not enabled: run 'graphite apps flathub' first" >&2; exit 1; }
+      if [[ $1 == install ]]; then flatpak install --user -y flathub "$id"; else flatpak uninstall --user -y "$id"; fi
+    elif [[ $1 == install ]]; then
+      pacman -Si "$id" >/dev/null 2>&1 || { echo "no such package: $id" >&2; exit 1; }
+      sudo_ pacman -S --needed "$id"
+    else
+      pk_inst "$id" || { echo "not installed: $id" >&2; exit 1; }
+      sudo_ pacman -Rns "$id"
+    fi ;;
+  flathub)
+    command -v flatpak >/dev/null || sudo_ pacman -S --needed flatpak || exit 1
+    flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && echo "Flathub enabled (per user)" ;;
+  status)
+    echo "pacman:  $(pacman -Sl 2>/dev/null | wc -l) packages in the sync databases"
+    if has_flathub; then echo "flathub: enabled"; elif command -v flatpak >/dev/null; then echo "flathub: flatpak installed, remote not added"; else echo "flathub: off (graphite apps flathub)"; fi ;;
+  -h|--help|help) help ;;
+  *) help >&2; exit 1 ;;
+esac
