@@ -289,4 +289,8 @@ else
 fi
 check "profile: creator plan lists OBS" 'graphite profile plan creator | grep -q "obs-studio"'
 check "profile: rejects an unknown profile" '! graphite profile plan bogus 2>/dev/null'
+# local settings sync (eco-1): export, change a file, import restores it and keeps a backup
+check "sync: export, import restores and backs up" 'd=$(mktemp -d) && graphite sync export $d/s.tar.gz >/dev/null && tar -tzf $d/s.tar.gz | grep -q "^hypr/hyprland.conf" && ! tar -tzf $d/s.tar.gz | grep -qE "(^|/)(\.ssh|\.gnupg|keyrings)/" && cp ~/.config/hypr/hyprland.conf $d/orig && echo "# sync-test" >> ~/.config/hypr/hyprland.conf && graphite sync import $d/s.tar.gz --yes >/dev/null && cmp -s ~/.config/hypr/hyprland.conf $d/orig && ls ~/.local/state/graphite/sync-backup-*.tar.gz'
+check "sync: git export commits" '! command -v git || { d=$(mktemp -d) && graphite sync export --git $d/repo >/dev/null && [ "$(git -C $d/repo rev-list --count HEAD)" = 1 ] && [ -f $d/repo/config/hypr/hyprland.conf ]; }'
+check "sync: import refuses a folder without settings" '! graphite sync import "$(mktemp -d)" --yes 2>/dev/null'
 echo "SMOKE: DONE fails=$fails"
