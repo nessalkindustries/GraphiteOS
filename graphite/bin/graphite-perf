@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Performance options (game-3). Everything is opt-in and reversible.
+#   graphite perf status             kernels installed/running, tuning preset, power profile
+#   graphite perf kernel plan        what 'kernel zen' would install
+#   graphite perf kernel zen         install linux-zen + headers (official repos) and add it to
+#                                    GRUB; linux and linux-lts stay installed as fallbacks
+#   graphite perf kernel remove-zen  remove linux-zen (refused while it is the running kernel)
+#   graphite perf tune gaming        sysctl/scheduler preset (/etc/sysctl.d/95-graphite-perf.conf)
+#                                    + 'performance' power profile
+#   graphite perf tune default       remove the preset, back to 'balanced'
+# Secure Boot: after 'kernel zen' run 'graphite secureboot sign' if you enrolled your own keys.
+# GRAPHITE_ROOT=<dir> writes the preset under <dir> without sudo/sysctl (tests).
+set -uo pipefail
+ROOT=${GRAPHITE_ROOT:-}
+CONF=$ROOT/etc/sysctl.d/95-graphite-perf.conf
+installed() { pacman -Qq "$1" >/dev/null 2>&1; }
+as_root() { if [[ -n $ROOT ]]; then "$@"; elif ((EUID == 0)); then "$@"; else sudo "$@"; fi; }
+help() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; }
+
+preset() { cat <<'P'
+# graphite perf tune gaming (generated; 'graphite perf tune default' removes it)
+# Lower scheduler/memory latency for games. https://wiki.archlinux.org/title/Gaming#Improving_performance
+# split-lock detection slows some games (Proton titles) on recent Intel/AMD CPUs
+kernel.split_lock_mitigate = 0
+# no background memory compaction stalls
+vm.compaction_proactiveness = 0
+# keep NUMA balancing from migrating game threads
+kernel.numa_balancing = 0
+# write back dirty pages earlier, in smaller batches (fewer stutters while shaders cache)
+vm.dirty_bytes = 268435456
+vm.dirty_background_bytes = 67108864
+# scheduler autogroup groups by session so a background compile cannot starve the game
+kernel.sched_autogroup_enabled = 1
+P
+}
+rebuild_grub() { [[ -n $ROOT ]] || as_root grub-mkconfig -o /boot/grub/grub.cfg; }
+
+case "${1:-status} ${2:-}" in
+  "status "*)
+    echo "running:  $(uname -r)"
+    echo "kernels:  $(for k in linux linux-lts linux-zen; do installed "$k" && printf '%s ' "$k"; done)"
+    if [[ -f $CONF ]]; then echo "tuning:   gaming"; else echo "tuning:   default"; fi
+    echo "power:    $(powerprofilesctl get 2>/dev/null || echo unknown)" ;;
+  "kernel plan")
+    if installed linux-zen; then echo "linux-zen is already installed"; else echo "would install: linux-zen linux-zen-headers (then grub-mkconfig)"; fi ;;
+  "kernel zen")
+    as_root pacman -S --needed linux-zen linux-zen-headers && rebuild_grub &&
+      echo "linux-zen installed; pick it under 'Advanced options' in GRUB (linux and linux-lts are still there)" ;;
+  "kernel remove-zen")
+    [[ $(uname -r) == *zen* ]] && { echo "linux-zen is running; reboot into linux or linux-lts first" >&2; exit 1; }
+    installed linux-zen || { echo "linux-zen is not installed"; exit 0; }
+    as_root pacman -Rns linux-zen linux-zen-headers && rebuild_grub ;;
+  "tune gaming")
+    preset | as_root install -Dm644 /dev/stdin "$CONF" || exit 1
+    if [[ -z $ROOT ]]; then as_root sysctl -q -p "$CONF" 2>/dev/null || true; powerprofilesctl set performance 2>/dev/null || true; fi
+    echo "tuning: gaming" ;;
+  "tune default")
+    as_root rm -f "$CONF" || exit 1
+    if [[ -z $ROOT ]]; then as_root sysctl -q --system >/dev/null 2>&1 || true; powerprofilesctl set balanced 2>/dev/null || true; fi
+    echo "tuning: default (reboot for every value to return to the kernel default)" ;;
+  "-h "*|"--help "*|"help "*) help ;;
+  *) help >&2; exit 1 ;;
+esac

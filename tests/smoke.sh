@@ -269,4 +269,9 @@ echo "SMOKE: diag audio: $(timeout 60 graphite audio status 2>&1 | head -2 | tr 
 check "audio: status reports the preset" 'timeout 60 graphite audio status | grep -q "preset:   lowlatency (quantum 64)"'
 check "audio: default preset restores quantum 1024" 'timeout 150 graphite audio default >/dev/null && aq 1024 && [ ! -f ~/.config/pipewire/pipewire.conf.d/90-graphite-latency.conf ]'
 check "audio: rejects a bad quantum" '! graphite audio lowlatency 7 2>/dev/null'
+# performance options (game-3): read-only/dry parts; the preset is written to a scratch root
+check "perf: status lists linux and linux-lts" 'graphite perf status | grep -q "kernels:  linux linux-lts"'
+check "perf: kernel plan offers linux-zen" 'graphite perf kernel plan | grep -q "linux-zen linux-zen-headers"'
+check "perf: gaming preset written and removed" 'r=$(mktemp -d) && GRAPHITE_ROOT=$r graphite perf tune gaming >/dev/null && grep -q "^kernel.split_lock_mitigate = 0" $r/etc/sysctl.d/95-graphite-perf.conf && GRAPHITE_ROOT=$r graphite perf status | grep -q "tuning:   gaming" && GRAPHITE_ROOT=$r graphite perf tune default >/dev/null && [ ! -e $r/etc/sysctl.d/95-graphite-perf.conf ]'
+check "perf: preset keys exist on this kernel" '(for k in kernel.split_lock_mitigate vm.compaction_proactiveness vm.dirty_bytes kernel.sched_autogroup_enabled; do [ -e /proc/sys/${k//.//} ] || [ $k = kernel.split_lock_mitigate ] || exit 1; done)'
 echo "SMOKE: DONE fails=$fails"
