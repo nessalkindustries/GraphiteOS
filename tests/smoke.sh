@@ -65,6 +65,7 @@ check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
 # desktop for the screenshots: fastfetch (logo) + a second tiled terminal
+check "fetch: config parses and prints the three sections" 'o=$(timeout 30 fastfetch --pipe true 2>&1 | sed "s/\x1b\[[0-9;]*m//g") && ! grep -qi "error" <<<"$o" && grep -q "─Hardware─" <<<"$o" && grep -q "─Software─" <<<"$o" && grep -q "─Age / Uptime / Update─" <<<"$o"'
 hyprctl dispatch exec "kitty -o font_size=8.5 --hold fastfetch" >/dev/null 2>&1; sleep 8
 hyprctl dispatch exec kitty >/dev/null 2>&1; sleep 8
 check "network: default route" 'ip route | grep -q "^default"'
@@ -314,6 +315,8 @@ check "installer: lists the disk" 'graphite installer disks | grep -qE "^/dev/[a
 check "installer: rejects bad answers" 'printf "disk=/dev/nope\nuser=Root\npassword=\nluks=short\n" | graphite-installer answers | grep -c "^error" | grep -qx 4'
 check "installer: accepts good answers, file is 0600" 'd=$(graphite-installer disks | head -1 | cut -f1); printf "disk=$d\nuser=tester\npassword=x\nluks=12345678\ntimezone=UTC\nprofile=full\n" | graphite-installer answers | grep -qx ok && [ "$(stat -c %a /tmp/gi-smoke/answers)" = 600 ] && [ "$(graphite-installer status | head -1)" = state=idle ]'
 graphite-installer open; sleep 8
+# slow TCG VMs can take 30s+ to map the window and start the IPC server
+for _ in $(seq 1 30); do timeout 10 hyprctl clients | grep -q "title: Install Graphite" && timeout 10 qs ipc -c graphite-installer call installer diskCount >/dev/null 2>&1 && break; sleep 2; done
 check "installer: window opens" 'timeout 10 hyprctl clients | grep -q "title: Install Graphite"'
 timeout 10 qs ipc -c graphite-installer call installer testMode >/dev/null 2>&1
 timeout 10 qs ipc -c graphite-installer call installer step 1 >/dev/null 2>&1; sleep 3

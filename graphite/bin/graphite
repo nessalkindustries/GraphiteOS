@@ -265,6 +265,7 @@ case $cmd in
   perf) graphite-perf "$@" ;;
   profile) graphite-profile "$@" ;;
   sync) graphite-sync "$@" ;;
+  fetch) exec graphite-fetch "$@" ;;
   installer|install-gui) graphite-installer "$@" ;;
   apps) graphite-apps "$@" ;;
   snapshots) snapshots ;;
