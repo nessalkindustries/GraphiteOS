@@ -23,8 +23,9 @@ done
 # host packages (override/pkgs.txt, e.g. a fixed graphite-config): install like an update would,
 # then run the user's pending migrations
 for f in $(curl -fsS "@HOST@/override/pkgs.txt" 2>/dev/null); do
+  systemctl start pacman-init.service 2>/dev/null   # live keyring (graphite key) must be populated first
   curl -fsS "@HOST@/override/$f" -o "/tmp/$f" && curl -fsS "@HOST@/override/$f.sig" -o "/tmp/$f.sig" &&
-    pacman -U --noconfirm "/tmp/$f" >/dev/null 2>&1 && echo "RICE: installed $f"
+    if o=$(pacman -U --noconfirm "/tmp/$f" 2>&1); then echo "RICE: installed $f"; else echo "RICE: install $f failed: $(tail -2 <<<"$o" | tr '\n' ' ')"; fi
 done
 [[ -n $(curl -fsS "@HOST@/override/pkgs.txt" 2>/dev/null) ]] && H graphite-migrate 2>&1 | sed 's/^/RICE: migrate: /'
 if curl -fsS "@HOST@/override/hyprland.conf" -o /tmp/hl.conf 2>/dev/null; then
