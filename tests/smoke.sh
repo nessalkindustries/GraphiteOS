@@ -65,8 +65,20 @@ check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
 # desktop for the screenshots: fastfetch (logo) + a second tiled terminal
-check "fetch: config parses and prints the three sections" 'o=$(timeout 30 fastfetch --pipe true 2>&1 | sed "s/\x1b\[[0-9;]*m//g") && ! grep -qi "error" <<<"$o" && grep -q "─Hardware─" <<<"$o" && grep -q "─Software─" <<<"$o" && grep -q "─Age / Uptime / Update─" <<<"$o"'
-hyprctl dispatch exec "kitty -o font_size=8.5 --hold fastfetch" >/dev/null 2>&1; sleep 8
+check "fetch: config parses and prints the three sections" 'o=$(timeout 30 fastfetch --pipe true 2>&1 | sed "s/\x1b\[[0-9;]*m//g") && ! grep -qi "error" <<<"$o" && grep -q "─ Hardware ─" <<<"$o" && grep -q "─ Software ─" <<<"$o" && grep -q "─ Age / Uptime / Update ─" <<<"$o"'
+check "fetch: Graphite logo prints" 'timeout 30 fastfetch --pipe true 2>&1 | grep -q "@@%%%%%%%#######"'
+# leak check in a real kitty: after fastfetch exits, anything still arriving on the tty (late
+# terminal-query replies) would be typed into the shell prompt. Collect it and expect nothing.
+leak=$XDG_RUNTIME_DIR/fetch-leak; rm -f "$leak" "$leak.done"
+printf '%s\n' '#!/bin/bash' 'fastfetch; sleep 8; stty -icanon -echo min 0 time 30' \
+  "dd bs=4096 count=1 2>/dev/null > $leak; touch $leak.done" > "$XDG_RUNTIME_DIR/fetch-leak.sh"
+chmod +x "$XDG_RUNTIME_DIR/fetch-leak.sh"
+hyprctl dispatch exec "kitty $XDG_RUNTIME_DIR/fetch-leak.sh" >/dev/null 2>&1
+for _ in $(seq 60); do [ -f "$leak.done" ] && break; sleep 3; done
+echo "SMOKE: diag fetch leak bytes=$(stat -c %s "$leak" 2>/dev/null) $(head -c 120 "$leak" 2>/dev/null | od -An -c | tr -s ' \n' ' ' | cut -c1-200)"
+check "fetch: no terminal escape replies left on the prompt" '[ -f "$leak.done" ] && [ ! -s "$leak" ]'
+sleep 2
+hyprctl dispatch exec "kitty -o font_size=8.5 --hold graphite-fetch" >/dev/null 2>&1; sleep 8
 hyprctl dispatch exec kitty >/dev/null 2>&1; sleep 8
 check "network: default route" 'ip route | grep -q "^default"'
 check "network: reach host" 'curl -fsS -m 10 -o /dev/null @HOST@/selftest.sh'

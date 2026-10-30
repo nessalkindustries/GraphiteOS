@@ -20,6 +20,13 @@ for f in $(curl -fsS "@HOST@/override/files.txt" 2>/dev/null); do
   curl -fsS "@HOST@/override/$f" -o "/usr/share/graphite/$f" && echo "RICE: override /usr/share/graphite/$f"
   [[ $f == bin/* ]] && chmod 755 "/usr/share/graphite/$f"
 done
+# host packages (override/pkgs.txt, e.g. a fixed graphite-config): install like an update would,
+# then run the user's pending migrations
+for f in $(curl -fsS "@HOST@/override/pkgs.txt" 2>/dev/null); do
+  curl -fsS "@HOST@/override/$f" -o "/tmp/$f" && curl -fsS "@HOST@/override/$f.sig" -o "/tmp/$f.sig" &&
+    pacman -U --noconfirm "/tmp/$f" >/dev/null 2>&1 && echo "RICE: installed $f"
+done
+[[ -n $(curl -fsS "@HOST@/override/pkgs.txt" 2>/dev/null) ]] && H graphite-migrate 2>&1 | sed 's/^/RICE: migrate: /'
 if curl -fsS "@HOST@/override/hyprland.conf" -o /tmp/hl.conf 2>/dev/null; then
   install -o $U -m644 /tmp/hl.conf /home/$U/.config/hypr/hyprland.conf && echo "RICE: using host hyprland.conf override"
   sleep 5; H hyprctl reload >/dev/null 2>&1
@@ -35,8 +42,8 @@ H notify-send -a Graphite -t 1 x >/dev/null 2>&1; H makoctl dismiss -a 2>/dev/nu
 H rofi -show drun & sleep 25; shot launcher; pkill -x rofi; sleep 8
 H graphite-menu power & sleep 20; shot menu-power 10; pkill -x rofi; sleep 8
 H graphite-keybinds & sleep 20; shot keybinds 10; pkill -x rofi; sleep 8
-H hyprctl dispatch exec "kitty --hold fastfetch" >/dev/null; sleep 25
-H hyprctl dispatch exec "kitty --hold fastfetch" >/dev/null; sleep 25
+H hyprctl dispatch exec "kitty --hold graphite-fetch" >/dev/null; sleep 25
+H hyprctl dispatch exec "kitty --hold graphite-fetch" >/dev/null; sleep 25
 H hyprctl dispatch exec "kitty" >/dev/null; sleep 30
 shot terminals 12
 for t in graphite-nord graphite-mocha graphite-light graphite-amber graphite-violet graphite-teal; do

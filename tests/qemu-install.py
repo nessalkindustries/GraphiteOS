@@ -133,6 +133,9 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
 def send(p, s):
     p.stdin.write(s.encode()); p.stdin.flush()
 
+# GRAPHITE_HARNESS_SMOKE_PRE: shell run in the serial session before smoke.sh (e.g. install a
+# fixed package from the harness repo into a --smoke-only disk without rebuilding the ISO)
+SMOKE_PRE = os.environ.get("GRAPHITE_HARNESS_SMOKE_PRE", "")
 SMOKE_ONLY = "--smoke-only" in sys.argv or SB_ONLY   # reuse disk + boot logs of the previous run, only redo the smoke boot
 if SMOKE_ONLY and not os.path.exists(DISK): sys.exit("--smoke-only/--sb-only needs an existing disk")
 if SB_ONLY: shutil.copy(OVMF_VARS_SRC, VARS)   # fresh key store (Setup Mode); boots via the removable BOOTX64.EFI
@@ -227,7 +230,7 @@ if not NO_SMOKE and any("SELFTEST: ALL DONE" in open(f, errors="replace").read()
                 if tail.endswith("login:") or "Login incorrect" in after:
                     note("serial login: incorrect/reprompt, retrying"); st["lg"] = "idle"
                 elif now - st["lg_t"] > 30:
-                    st["smoke"] = 1; send(p, f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.monotonic()
+                    st["smoke"] = 1; send(p, (SMOKE_PRE + "; " if SMOKE_PRE else "") + f"curl -fsS {host}/smoke.sh | bash 2>&1 | sed 's/^/@/'\r"); st["st"] = time.monotonic()
         for m in re.findall(r"@SMOKE: ([^\r\n]*)[\r\n]", text):
             if ("sm", m) not in st: st[("sm", m)] = 1; note("SMOKE: " + m)
             if m.startswith("SHOT ") and ("shotx", m) not in st:
