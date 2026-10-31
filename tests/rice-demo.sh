@@ -23,9 +23,18 @@ done
 # host packages (override/pkgs.txt, e.g. a fixed graphite-config): install like an update would,
 # then run the user's pending migrations
 for f in $(curl -fsS "@HOST@/override/pkgs.txt" 2>/dev/null); do
-  systemctl start pacman-init.service 2>/dev/null   # live keyring (graphite key) must be populated first
+  # live keyring (graphite key) must be populated first. Do not 'systemctl start' it: we run inside a
+  # boot-time oneshot and that job can wait on us. Poll, then populate by hand as a last resort.
+  fpr=$(cat /usr/share/pacman/keyrings/graphite*.gpg 2>/dev/null | gpg --show-keys --with-colons 2>/dev/null | awk -F: '$1=="fpr"{print $10; exit}')
+  for _ in $(seq 60); do [[ -n $fpr ]] && pacman-key --list-keys "$fpr" >/dev/null 2>&1 && break; sleep 3; done
+  [[ -n $fpr ]] && pacman-key --list-keys "$fpr" >/dev/null 2>&1 || { echo "RICE: keyring not ready, populating"; pacman-key --init >/dev/null 2>&1; pacman-key --populate >/dev/null 2>&1; }
   curl -fsS "@HOST@/override/$f" -o "/tmp/$f" && curl -fsS "@HOST@/override/$f.sig" -o "/tmp/$f.sig" &&
-    if o=$(pacman -U --noconfirm "/tmp/$f" 2>&1); then echo "RICE: installed $f"; else echo "RICE: install $f failed: $(tail -2 <<<"$o" | tr '\n' ' ')"; fi
+    { o=$(pacman -U --noconfirm "/tmp/$f" 2>&1) || { curl -fsS "@HOST@/override/graphite.pub" -o /tmp/g.pub && G=$(mktemp -d) &&
+        gpg --homedir "$G" -q --import /tmp/g.pub 2>/dev/null && gpg --homedir "$G" -q --verify "/tmp/$f.sig" "/tmp/$f" 2>/dev/null &&
+        echo "RICE: $f signature verified with gpg (live keyring lacks the key)" && sed 's/^#\?LocalFileSigLevel.*/LocalFileSigLevel = Never/' /etc/pacman.conf > /tmp/pc.conf &&
+        grep -q '^LocalFileSigLevel' /tmp/pc.conf || sed -i 's/^\[options\]/&\nLocalFileSigLevel = Never/' /tmp/pc.conf; o=$(pacman --config /tmp/pc.conf -U --noconfirm "/tmp/$f" 2>&1); }; }
+    n=${f%-*-*-*}; v=${f#"$n"-}; v=${v%-*}
+    if [[ $(pacman -Q "$n" 2>/dev/null) == "$n $v" ]]; then echo "RICE: installed $f"; else echo "RICE: install $f failed: $(tail -2 <<<"$o" | tr '\n' ' ')"; fi
 done
 [[ -n $(curl -fsS "@HOST@/override/pkgs.txt" 2>/dev/null) ]] && H graphite-migrate 2>&1 | sed 's/^/RICE: migrate: /'
 if curl -fsS "@HOST@/override/hyprland.conf" -o /tmp/hl.conf 2>/dev/null; then
