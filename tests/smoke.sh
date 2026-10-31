@@ -67,6 +67,7 @@ echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-
 # desktop for the screenshots: fastfetch (logo) + a second tiled terminal
 check "fetch: config parses and prints the three sections" 'o=$(timeout 30 fastfetch --pipe true 2>&1 | sed "s/\x1b\[[0-9;]*m//g") && ! grep -qi "error" <<<"$o" && grep -q "─ Hardware ─" <<<"$o" && grep -q "─ Software ─" <<<"$o" && grep -q "─ Age / Uptime / Update ─" <<<"$o"'
 check "fetch: Graphite logo prints" 'timeout 30 fastfetch --pipe true 2>&1 | grep -q "@@%%%%%%%#######"'
+check "fetch: logo sits left of the boxes in a wide terminal" 'o=$(COLUMNS=160 timeout 30 fastfetch --pipe true --logo-position left 2>&1 | sed "s/\x1b\[[0-9;]*m//g") && grep -qE "[@%#*+=:-]{10,} +[├┌└]" <<<"$o"'
 # leak check in a real kitty: after fastfetch exits, anything still arriving on the tty (late
 # terminal-query replies) would be typed into the shell prompt. Collect it and expect nothing.
 leak=$XDG_RUNTIME_DIR/fetch-leak; rm -f "$leak" "$leak.done"
