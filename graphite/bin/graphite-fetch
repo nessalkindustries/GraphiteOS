@@ -38,6 +38,21 @@ case ${1:-} in
     l=$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1)
     [[ -n $l ]] || l=$(grep -a '\[ALPM\] transaction completed' /var/log/pacman.log 2>/dev/null | tail -1)
     t=$(sed -nE 's/^\[([^]]+)\].*/\1/p' <<<"$l"); [[ -n $t ]] && fmt_date "$t" || echo never ;;
-  -h|--help) echo "usage: graphite-fetch [fastfetch args] | os|theme|browser|palette|age|updated" ;;
-  *) exec fastfetch "$@" ;;
+  font) # read the terminal's config instead of querying the terminal (no escape replies)
+    f="" z=""
+    if [[ -n ${KITTY_WINDOW_ID:-} || ${TERM:-} == xterm-kitty ]]; then
+      for c in "${XDG_CONFIG_HOME:-$HOME/.config}/kitty/kitty.conf" /etc/xdg/kitty/kitty.conf; do
+        [[ -f $c ]] || continue
+        f=$(sed -nE 's/^[[:space:]]*font_family[[:space:]]+(.+[^[:space:]])[[:space:]]*$/\1/p' "$c" | tail -1)
+        z=$(sed -nE 's/^[[:space:]]*font_size[[:space:]]+([0-9.]+).*/\1/p' "$c" | tail -1)
+        [[ -n $f ]] && break
+      done
+    fi
+    [[ -n $f ]] || f=$(fc-match -f '%{family[0]}' monospace 2>/dev/null)
+    echo "${f:-n/a}${z:+ (${z}pt)}" ;;
+  -h|--help) echo "usage: graphite-fetch [fastfetch args] | os|theme|browser|palette|font|age|updated" ;;
+  *) # narrow terminal: logo above the boxes instead of beside them
+    c=$(stty size 2>/dev/null </dev/tty | cut -d" " -f2); [[ $c =~ ^[0-9]+$ ]] || c=${COLUMNS:-120}
+    if ((c < 90)); then exec fastfetch --logo-position top "$@"; fi
+    exec fastfetch "$@" ;;
 esac
