@@ -29,12 +29,21 @@ step() { ((STEP < STEPS)) && STEP=$((STEP + 1)); printf '\e[38;2;94;234;212m==>\
 step_hook() { [[ ${GRAPHITE_TEST_FAIL_AT:-} == "$STEP" ]] && die "forced failure at step $STEP (GRAPHITE_TEST_FAIL_AT)"; true; }
 NO_NET_MSG="No internet: plug in ethernet or connect Wi-Fi (iwctl, or the Wi-Fi menu in the bar)"
 NET_HOST=${GRAPHITE_NET_CHECK_HOST:-archive.archlinux.org}
-# Preflight: name resolution + HTTPS to the package archive, before anything touches the disk.
+# hosts that count as "online": the archive, else a live Arch mirror (the install falls back to it)
+NET_HOSTS=${GRAPHITE_NET_CHECK_HOST:-archive.archlinux.org geo.mirror.pkgbuild.com archlinux.org}
+# Preflight: name resolution + HTTPS, before anything touches the disk (archinstall checks
+# connectivity before it starts too). Any one reachable host is enough.
 net_ok() {
   [[ ${GRAPHITE_SKIP_NET_CHECK:-0} == 1 ]] && return 0
-  timeout 15 getent ahosts "$NET_HOST" >/dev/null 2>&1 || return 1
-  curl -fsS -o /dev/null --connect-timeout 10 --max-time 20 "https://$NET_HOST/" 2>/dev/null
+  local h
+  for h in $NET_HOSTS; do
+    timeout 15 getent ahosts "$h" >/dev/null 2>&1 &&
+      curl -fsS -o /dev/null --connect-timeout 10 --max-time 20 "https://$h/" 2>/dev/null && { NET_HOST=$h; return 0; }
+  done
+  return 1
 }
+# retry a network-bound command (mirrors and the archive have transient 5xx/timeouts)
+retry() { local n=1; until "$@"; do ((n >= 3)) && return 1; log "attempt $n failed: $*; retrying in $((n * 10))s"; sleep $((n * 10)); n=$((n + 1)); done; }
 
 while (($#)); do
   case $1 in
@@ -111,7 +120,8 @@ release_disk() {
 on_exit() {
   local rc=$?
   if ((rc != 0)); then
-    echo "graphite-iso-install: install failed (exit $rc); releasing $DISK so it can be retried" >&2
+    echo "graphite-iso-install: install failed at step $STEP/12 (exit $rc); releasing $DISK so it can be retried" >&2
+    echo "graphite-iso-install: nothing was installed. Fix the error above, then 'Try again' (or run graphite-installer reset && graphite-installer start)" >&2
     release_disk
   fi
 }
@@ -119,6 +129,9 @@ on_exit() {
 step "Partitioning $DISK"
 release_disk
 trap on_exit EXIT
+# wipe old signatures on every partition first (stale LUKS/btrfs/swap headers would
+# otherwise be re-detected by udev/blkid on the new layout), then the disk itself
+for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do wipefs -af "$p" >/dev/null 2>&1 || true; done
 wipefs -af "$DISK"
 sgdisk -Z "$DISK" >/dev/null
 sgdisk -n1:0:+1G -t1:ef00 -c1:EFI -n2:0:0 -t2:8309 -c2:GraphiteRoot "$DISK" >/dev/null
@@ -173,12 +186,22 @@ printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$REPO
 SNAPSHOT=${GRAPHITE_SNAPSHOT:-$(cat "$GRAPHITE_SRC/snapshot" 2>/dev/null || true)}
 if [[ $SNAPSHOT =~ ^[0-9]{4}/[0-9]{2}/[0-9]{2}$ ]]; then
   log "installing from the Arch Linux Archive snapshot $SNAPSHOT (same as the ISO build)"
-  sed -i -E "s|^Include = /etc/pacman.d/mirrorlist|Server = https://archive.archlinux.org/repos/$SNAPSHOT/\$repo/os/\$arch|" "$CONF"
+  if retry curl -fsS -o /dev/null --connect-timeout 10 --max-time 60 "https://archive.archlinux.org/repos/$SNAPSHOT/core/os/x86_64/core.db"; then
+    sed -i -E "s|^Include = /etc/pacman.d/mirrorlist|Server = https://archive.archlinux.org/repos/$SNAPSHOT/\$repo/os/\$arch|" "$CONF"
+  else
+    # archive down/unreachable: install from live mirrors instead of failing (the Hyprland
+    # IgnorePkg hold below still keeps the tested 0.56 stack out of reach of 0.57)
+    log "WARNING: Arch Linux Archive unreachable; falling back to the live mirrors (/etc/pacman.d/mirrorlist)"
+    SNAPSHOT=""
+  fi
 fi
+# parallel downloads + more patient mirror timeouts (archinstall sets ParallelDownloads too)
+sed -i -E 's/^#?ParallelDownloads.*/ParallelDownloads = 5/' "$CONF"
+grep -q '^ParallelDownloads' "$CONF" || sed -i '/^\[options\]/a ParallelDownloads = 5' "$CONF"
 # pacstrap only needs the official repos; a signed [graphite] db would fail here
 # because its key is not in the live keyring (it is trusted in the target below)
 PSCONF=$(mktemp); sed '/^\[graphite\]/,$d' "$CONF" > "$PSCONF"
-pacstrap -C "$PSCONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
+retry pacstrap -C "$PSCONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
   btrfs-progs cryptsetup grub efibootmgr sudo networkmanager nano vim man-db
 
 step "Configuring target"
@@ -274,6 +297,21 @@ printf '%s:%s\n' "$USERNAME" "$PASSWORD" | achroot "$MNT" chpasswd
 achroot "$MNT" passwd -l root >/dev/null
 achroot "$MNT" locale-gen >/dev/null
 achroot "$MNT" systemctl enable NetworkManager.service >/dev/null
+# carry the live session's network over so the first boot is online (idea from archinstall's
+# copy_iso_network_config): NetworkManager profiles (Wi-Fi joined in the live bar/nmcli) and iwd psk files
+if compgen -G "/etc/NetworkManager/system-connections/*" >/dev/null; then
+  install -d -m 700 "$MNT/etc/NetworkManager/system-connections"
+  cp -a /etc/NetworkManager/system-connections/. "$MNT/etc/NetworkManager/system-connections/"
+fi
+# networks joined with plain iwctl: turn iwd's WPA-PSK files into NetworkManager profiles
+for f in /var/lib/iwd/*.psk; do
+  [[ -f $f ]] || continue
+  ssid=$(basename "$f" .psk); pass=$(sed -n 's/^Passphrase=//p' "$f" | head -1)
+  [[ -n $pass && $ssid != =* ]] || continue   # hex-encoded SSIDs / raw keys: skip
+  nmf="$MNT/etc/NetworkManager/system-connections/$ssid.nmconnection"; [[ -e $nmf ]] && continue
+  install -d -m 700 "${nmf%/*}"
+  ( umask 077; printf '[connection]\nid=%s\ntype=wifi\n\n[wifi]\nssid=%s\nmode=infrastructure\n\n[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' "$ssid" "$ssid" "$pass" > "$nmf" )
+done
 step "Graphite packages and setup (install.sh)"
 achroot "$MNT" getent hosts "$NET_HOST" >/dev/null || { [[ ${GRAPHITE_SKIP_NET_CHECK:-0} == 1 ]] || die "DNS does not work inside the install chroot ($NET_HOST); $NO_NET_MSG"; }
 GRAPHITE_PATH=/var/lib/graphite/src achroot "$MNT" /var/lib/graphite/src/install.sh "${ARGS[@]}"
