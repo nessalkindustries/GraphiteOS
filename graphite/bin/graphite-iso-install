@@ -96,7 +96,7 @@ fi
 # Release everything a previous (failed) run may still hold on $MNT / $DISK, so a retry
 # works without a reboot: processes chrooted into $MNT (gpg-agent from pacman-key...),
 # swap, mounts (recursively), and dm-crypt mappings (cryptroot or any crypt on the disk).
-release_disk() {
+_release_disk() {
   local pid r p m
   for pid in /proc/[0-9]*; do
     r=$(readlink "$pid/root" 2>/dev/null) || continue
@@ -117,6 +117,8 @@ release_disk() {
   udevadm settle 2>/dev/null
   true
 }
+# best effort: nothing in here may abort the install (set -e), e.g. swapoff of a missing device
+release_disk() { (set +e; trap - ERR; _release_disk) || true; }
 on_exit() {
   local rc=$?
   if ((rc != 0)); then
