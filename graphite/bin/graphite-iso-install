@@ -340,6 +340,8 @@ achroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --removabl
 if ((SERIAL == 0)); then
   step "Boot splash"
   achroot "$MNT" graphite splash on --no-rebuild || log "warning: boot splash not enabled"
+else
+  step "Boot splash (skipped: serial console install)"   # always counted, so installs end at 12/12
 fi
 step "Initramfs and GRUB menu"
 achroot "$MNT" mkinitcpio -P >/dev/null
