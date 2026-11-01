@@ -18,6 +18,7 @@ ShellRoot {
     property string progress: ""
     property string last: ""
     property bool dryRun: false     // IPC/tests: validate but never start the install
+    property string net: ""         // "" = checking, "ok", or the no-internet message
 
     function kv(t) { const o = {}; for (const l of t.split("\n")) { const i = l.indexOf("="); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); } return o; }
     function answers() {
@@ -53,6 +54,21 @@ ShellRoot {
             root.istate = o.state || "idle"; root.progress = o.step || ""; root.last = o.last || "";
             if (root.istate === "done" || root.istate === "failed") poll.running = false; } } }
     Timer { id: poll; interval: 2000; repeat: true; onTriggered: statP.running = true }
+    // reopened after/while an install ran: show its state (Try again lives there)
+    Process { id: initStatP; command: ["graphite-installer", "status"]; running: true
+        stdout: StdioCollector { onStreamFinished: { const o = root.kv(this.text);
+            if (o.state === "running" || o.state === "done" || o.state === "failed") {
+                root.istate = o.state; root.progress = o.step || ""; root.last = o.last || ""; root.step = 6;
+                if (o.state === "running") poll.running = true; } } } }
+    // internet preflight (same check graphite-installer check / graphite-iso-install do)
+    Process { id: netP; command: ["graphite-installer", "net"]
+        stdout: StdioCollector { onStreamFinished: { const t = this.text.trim(); root.net = t === "ok" ? "ok" : t.replace(/^error: /, ""); } } }
+    Timer { interval: 5000; repeat: true; running: root.step < 6; triggeredOnStart: true; onTriggered: if (!netP.running) netP.running = true }
+    // failed run: clear exit + log (answers kept), back to Summary (or Welcome if the secrets are gone)
+    function retry() { resetP.running = true; }
+    Process { id: resetP; command: ["graphite-installer", "reset"]
+        onExited: { root.istate = "idle"; root.progress = ""; root.last = ""; root.err = "";
+                    root.step = (pw1.text.length && lk1.text.length) ? 5 : 0; netP.running = true; } }
     Process { id: rebootP; command: ["systemctl", "reboot"] }
 
     IpcHandler {
@@ -65,6 +81,9 @@ ShellRoot {
             root.disk = disk; userF.text = user; pw1.text = pass; pw2.text = pass; lk1.text = luks; lk2.text = luks; }
         function confirm(): void { root.validate(); }
         function error(): string { return root.err; }
+        function state(): string { return root.istate; }
+        function network(): string { return root.net; }
+        function tryAgain(): void { root.retry(); }
         function quit(): void { Qt.quit(); }
     }
 
@@ -156,11 +175,16 @@ ShellRoot {
                 ColumnLayout { anchors.fill: parent; visible: root.step === 6; spacing: 12
                     Text { text: root.istate === "done" ? "Graphite is installed." : root.istate === "failed" ? "The install failed." : "Installing…"
                            color: Colors.foreground; font.pixelSize: 20 }
-                    Para { text: "Step " + root.progress + (root.last ? ": " + root.last : "") }
+                    Para { text: (root.progress ? "Step " + root.progress : "Starting…") + (root.last ? ": " + root.last : "") }
                     Para { visible: root.istate === "failed"; text: "Full log: /tmp/graphite-installer/install.log" }
                     Btn { visible: root.istate === "done"; primary: true; label: "Reboot now"; onClicked: rebootP.running = true }
+                    RowLayout { visible: root.istate === "failed"; spacing: 10
+                        Btn { primary: true; label: "Try again"; onClicked: root.retry() }
+                        Btn { label: "Quit"; onClicked: Qt.quit() } }
                     Item { Layout.fillHeight: true } } }
 
+            Text { visible: root.step < 6 && root.net.length > 0 && root.net !== "ok"; text: root.net
+                   color: Colors.red; font.pixelSize: 14; font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Text { visible: root.err.length > 0; text: root.err; color: Colors.red; font.pixelSize: 13; wrapMode: Text.Wrap; Layout.fillWidth: true }
             RowLayout { visible: root.step < 6; Layout.fillWidth: true; spacing: 10
                 Btn { label: "Quit"; onClicked: Qt.quit() }
