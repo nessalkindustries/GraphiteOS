@@ -21,6 +21,29 @@ ORIG_ARGS=("$@")   # kept for the sudo re-exec below (the parser shifts "$@" awa
 
 die() { echo "graphite-iso-install: error: $*" >&2; exit 1; }
 log() { printf '\e[38;2;94;234;212m==>\e[0m %s\n' "$*"; }
+# numbered top-level steps ("==> [N/12] ..."): graphite-installer status reads these markers,
+# so the counter can never run past the total (install.sh's own "==>" lines are not counted)
+STEPS=12; STEP=0
+step() { ((STEP < STEPS)) && STEP=$((STEP + 1)); printf '\e[38;2;94;234;212m==>\e[0m [%d/%d] %s\n' "$STEP" "$STEPS" "$*"; }
+# GRAPHITE_TEST_FAIL_AT=N (QEMU harness only): fail at step N to test cleanup + retry
+step_hook() { [[ ${GRAPHITE_TEST_FAIL_AT:-} == "$STEP" ]] && die "forced failure at step $STEP (GRAPHITE_TEST_FAIL_AT)"; true; }
+NO_NET_MSG="No internet: plug in ethernet or connect Wi-Fi (iwctl, or the Wi-Fi menu in the bar)"
+NET_HOST=${GRAPHITE_NET_CHECK_HOST:-archive.archlinux.org}
+# hosts that count as "online": the archive, else a live Arch mirror (the install falls back to it)
+NET_HOSTS=${GRAPHITE_NET_CHECK_HOST:-archive.archlinux.org geo.mirror.pkgbuild.com archlinux.org}
+# Preflight: name resolution + HTTPS, before anything touches the disk (archinstall checks
+# connectivity before it starts too). Any one reachable host is enough.
+net_ok() {
+  [[ ${GRAPHITE_SKIP_NET_CHECK:-0} == 1 ]] && return 0
+  local h
+  for h in $NET_HOSTS; do
+    timeout 15 getent ahosts "$h" >/dev/null 2>&1 &&
+      curl -fsS -o /dev/null --connect-timeout 10 --max-time 20 "https://$h/" 2>/dev/null && { NET_HOST=$h; return 0; }
+  done
+  return 1
+}
+# retry a network-bound command (mirrors and the archive have transient 5xx/timeouts)
+retry() { local n=1; until "$@"; do ((n >= 3)) && return 1; log "attempt $n failed: $*; retrying in $((n * 10))s"; sleep $((n * 10)); n=$((n + 1)); done; }
 
 while (($#)); do
   case $1 in
@@ -63,14 +86,54 @@ if [[ -z $DISK ]]; then lsblk -dpno NAME,SIZE,MODEL | grep -v -e loop -e sr; DIS
 [[ -b $DISK ]] || die "$DISK is not a block device"
 [[ $USERNAME =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid username"
 [[ -e /usr/share/zoneinfo/$TZ_ ]] || die "unknown timezone $TZ_"
+step "Checking the internet connection ($NET_HOST)"
+net_ok || die "$NO_NET_MSG"
 if ((! YES)); then
   read -r -p "ALL DATA ON $DISK WILL BE ERASED. Type 'yes' to continue: " c
   [[ $c == yes ]] || die "aborted"
 fi
 
-log "Partitioning $DISK"
-umount -R "$MNT" 2>/dev/null || true
-cryptsetup close cryptroot 2>/dev/null || true
+# Release everything a previous (failed) run may still hold on $MNT / $DISK, so a retry
+# works without a reboot: processes chrooted into $MNT (gpg-agent from pacman-key...),
+# swap, mounts (recursively), and dm-crypt mappings (cryptroot or any crypt on the disk).
+_release_disk() {
+  local pid r p m
+  for pid in /proc/[0-9]*; do
+    r=$(readlink "$pid/root" 2>/dev/null) || continue
+    [[ $r == "$MNT" || $r == "$MNT"/* ]] && kill -9 "${pid##*/}" 2>/dev/null
+  done
+  swapoff /dev/mapper/cryptroot 2>/dev/null
+  for p in $(lsblk -lnpo NAME "$DISK" 2>/dev/null); do swapoff "$p" 2>/dev/null; done
+  if findmnt -rn "$MNT" >/dev/null 2>&1 || findmnt -rnR "$MNT" >/dev/null 2>&1; then
+    umount -R "$MNT" 2>/dev/null || { sleep 2; umount -R "$MNT" 2>/dev/null; } || umount -R -l "$MNT" 2>/dev/null
+  fi
+  # anything else mounted from the disk or its crypt mappings (e.g. an auto-mount)
+  for p in $(lsblk -lnpo NAME "$DISK" 2>/dev/null | tac) /dev/mapper/cryptroot; do
+    findmnt -rno TARGET -S "$p" 2>/dev/null | sort -r | while read -r m; do umount "$m" 2>/dev/null || umount -l "$m" 2>/dev/null; done
+  done
+  for m in $(lsblk -lnpo NAME,TYPE "$DISK" 2>/dev/null | awk '$2=="crypt"{print $1}') /dev/mapper/cryptroot; do
+    [[ -e $m ]] && { cryptsetup close "${m##*/}" 2>/dev/null || dmsetup remove --retry "${m##*/}" 2>/dev/null; }
+  done
+  udevadm settle 2>/dev/null
+  true
+}
+# best effort: nothing in here may abort the install (set -e), e.g. swapoff of a missing device
+release_disk() { (set +e; trap - ERR; _release_disk) || true; }
+on_exit() {
+  local rc=$?
+  if ((rc != 0)); then
+    echo "graphite-iso-install: install failed at step $STEP/12 (exit $rc); releasing $DISK so it can be retried" >&2
+    echo "graphite-iso-install: nothing was installed. Fix the error above, then 'Try again' (or run graphite-installer reset && graphite-installer start)" >&2
+    release_disk
+  fi
+}
+
+step "Partitioning $DISK"
+release_disk
+trap on_exit EXIT
+# wipe old signatures on every partition first (stale LUKS/btrfs/swap headers would
+# otherwise be re-detected by udev/blkid on the new layout), then the disk itself
+for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do wipefs -af "$p" >/dev/null 2>&1 || true; done
 wipefs -af "$DISK"
 sgdisk -Z "$DISK" >/dev/null
 sgdisk -n1:0:+1G -t1:ef00 -c1:EFI -n2:0:0 -t2:8309 -c2:GraphiteRoot "$DISK" >/dev/null
@@ -79,12 +142,12 @@ part() { lsblk -lnpo NAME,PARTN "$DISK" | awk -v n="$1" '$2==n{print $1}'; }
 ESP=$(part 1); ROOT=$(part 2)
 [[ -b $ESP && -b $ROOT ]] || die "partitions not found"
 
-log "LUKS2 on $ROOT"
+step "LUKS2 on $ROOT"
 printf '%s' "$LUKS_PASS" | cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file - "$ROOT"
 printf '%s' "$LUKS_PASS" | cryptsetup open --key-file - "$ROOT" cryptroot
 LUKS_UUID=$(blkid -s UUID -o value "$ROOT")
 
-log "Btrfs + subvolumes"
+step "Btrfs + subvolumes"
 mkfs.fat -F32 -n EFI "$ESP" >/dev/null
 mkfs.btrfs -f -L graphite /dev/mapper/cryptroot >/dev/null
 mount /dev/mapper/cryptroot "$MNT"
@@ -99,7 +162,8 @@ mount -o "$OPTS,subvol=@pkg" /dev/mapper/cryptroot "$MNT/var/cache/pacman/pkg"
 mount -o "$OPTS,subvol=@snapshots" /dev/mapper/cryptroot "$MNT/.snapshots"
 mount -o umask=0077 "$ESP" "$MNT/boot"
 
-log "Base system (pacstrap)"
+step "Base system (pacstrap)"
+step_hook
 # On the live ISO the pacman keyring is created at boot by pacman-init.service,
 # but that unit is ordered after time-sync.target and never runs while NTP is
 # unreachable (systemd-time-wait-sync). Wait briefly, then init the keyring ourselves.
@@ -124,28 +188,75 @@ printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$REPO
 SNAPSHOT=${GRAPHITE_SNAPSHOT:-$(cat "$GRAPHITE_SRC/snapshot" 2>/dev/null || true)}
 if [[ $SNAPSHOT =~ ^[0-9]{4}/[0-9]{2}/[0-9]{2}$ ]]; then
   log "installing from the Arch Linux Archive snapshot $SNAPSHOT (same as the ISO build)"
-  sed -i -E "s|^Include = /etc/pacman.d/mirrorlist|Server = https://archive.archlinux.org/repos/$SNAPSHOT/\$repo/os/\$arch|" "$CONF"
+  if retry curl -fsS -o /dev/null --connect-timeout 10 --max-time 60 "https://archive.archlinux.org/repos/$SNAPSHOT/core/os/x86_64/core.db"; then
+    sed -i -E "s|^Include = /etc/pacman.d/mirrorlist|Server = https://archive.archlinux.org/repos/$SNAPSHOT/\$repo/os/\$arch|" "$CONF"
+  else
+    # archive down/unreachable: install from live mirrors instead of failing (the Hyprland
+    # IgnorePkg hold below still keeps the tested 0.56 stack out of reach of 0.57)
+    log "WARNING: Arch Linux Archive unreachable; falling back to the live mirrors (/etc/pacman.d/mirrorlist)"
+    SNAPSHOT=""
+  fi
 fi
+# parallel downloads + more patient mirror timeouts (archinstall sets ParallelDownloads too)
+sed -i -E 's/^#?ParallelDownloads.*/ParallelDownloads = 5/' "$CONF"
+grep -q '^ParallelDownloads' "$CONF" || sed -i '/^\[options\]/a ParallelDownloads = 5' "$CONF"
 # pacstrap only needs the official repos; a signed [graphite] db would fail here
 # because its key is not in the live keyring (it is trusted in the target below)
 PSCONF=$(mktemp); sed '/^\[graphite\]/,$d' "$CONF" > "$PSCONF"
-pacstrap -C "$PSCONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
+retry pacstrap -C "$PSCONF" -K "$MNT" base linux linux-lts linux-firmware amd-ucode intel-ucode \
   btrfs-progs cryptsetup grub efibootmgr sudo networkmanager nano vim man-db
 
-log "Configuring target"
+step "Configuring target"
+step_hook
 genfstab -U "$MNT" >> "$MNT/etc/fstab"
 # mount by subvolume *name* only: a rollback replaces @ with a new subvolume id
 sed -i -E 's/,?subvolid=[0-9]+//' "$MNT/etc/fstab"
 install -d "$MNT/var/lib/graphite"
 cp -a "$REPO_SRC" "$MNT/var/lib/graphite/repo"
 cp -a "$GRAPHITE_SRC" "$MNT/var/lib/graphite/src"
+# DNS inside the chroot. By default arch-chroot bind-mounts the live /etc/resolv.conf over the
+# target's, and on the live ISO that is systemd-resolved's stub (nameserver 127.0.0.53), and the
+# target's nsswitch "resolve [!UNAVAIL=return]" also goes to the live resolved over /run: all
+# DNS inside the chroot depended on the live resolver stub (real hardware: "Could not resolve
+# host" for every db). Give the target a real resolv.conf with the upstream servers instead
+# (arch-chroot -r keeps it) and plain "files dns" lookups while installing; both are restored
+# at the end so NetworkManager owns /etc/resolv.conf on the installed system.
+target_dns() {
+  local t=$MNT/etc/resolv.conf src ns=()
+  for src in /run/systemd/resolve/resolv.conf /run/NetworkManager/no-stub-resolv.conf /etc/resolv.conf; do
+    [[ -r $src ]] || continue
+    mapfile -t ns < <(awk '$1=="nameserver" && $2 !~ /^127\./ && $2 != "::1" {print $2}' "$src")
+    ((${#ns[@]})) && break
+  done
+  ((${#ns[@]})) || ns=(1.1.1.1 9.9.9.9 8.8.8.8)
+  [[ -e $MNT/etc/.resolv.conf.graphite-orig ]] || cp -a "$t" "$MNT/etc/.resolv.conf.graphite-orig" 2>/dev/null || :
+  [[ -e $MNT/etc/.nsswitch.conf.graphite-orig ]] || cp -a "$MNT/etc/nsswitch.conf" "$MNT/etc/.nsswitch.conf.graphite-orig" 2>/dev/null || :
+  rm -f "$t"
+  { echo "# graphite-iso-install: temporary DNS for the install chroot (from ${src:-public resolvers})"
+    printf 'nameserver %s\n' "${ns[@]:0:3}"; echo "options timeout:3 attempts:3"; } > "$t"
+  [[ -f $MNT/etc/nsswitch.conf ]] && sed -i -E 's/^hosts:.*/hosts: files myhostname dns/' "$MNT/etc/nsswitch.conf"
+  log "chroot DNS: ${ns[*]:0:3}"
+}
+restore_dns() {
+  if [[ -e $MNT/etc/.resolv.conf.graphite-orig || -L $MNT/etc/.resolv.conf.graphite-orig ]]; then
+    mv -f "$MNT/etc/.resolv.conf.graphite-orig" "$MNT/etc/resolv.conf"
+  else
+    printf '# Managed by NetworkManager\n' > "$MNT/etc/resolv.conf"
+  fi
+  [[ -e $MNT/etc/.nsswitch.conf.graphite-orig ]] && mv -f "$MNT/etc/.nsswitch.conf.graphite-orig" "$MNT/etc/nsswitch.conf"
+  true
+}
+# arch-chroot -r: keep the target's own resolv.conf (no bind mount of the live stub)
+ACH=(arch-chroot); arch-chroot -h 2>&1 | grep -qE '^ +-r ' && ACH+=(-r)
+achroot() { "${ACH[@]}" "$@"; }
+target_dns
 sed -e "s#file://$REPO_SRC#file:///var/lib/graphite/repo#" -e '/^CacheServer/d' "$CONF" > "$MNT/etc/pacman.conf"
 # signed [graphite] repo (build.sh with GRAPHITE_SIGN_KEY): trust only that key
 # in the target keyring and require valid package + database signatures
 if [[ -f $REPO_SRC/graphite.pub ]]; then
   log "[graphite] repo is signed: importing its key and requiring signatures"
-  arch-chroot "$MNT" pacman-key --add /var/lib/graphite/repo/graphite.pub >/dev/null
-  arch-chroot "$MNT" pacman-key --lsign-key "$(cat "$REPO_SRC/graphite.fpr")" >/dev/null
+  achroot "$MNT" pacman-key --add /var/lib/graphite/repo/graphite.pub >/dev/null
+  achroot "$MNT" pacman-key --lsign-key "$(cat "$REPO_SRC/graphite.fpr")" >/dev/null
   sed -i '/^\[graphite\]/,/^$/s/^SigLevel = .*/SigLevel = Required/' "$MNT/etc/pacman.conf"
   # remote mirror (base-3): updates come from it, the copy on disk stays as fallback.
   # GRAPHITE_REPO_URL overrides the URL baked into the ISO (graphite.url).
@@ -157,7 +268,7 @@ if [[ -f $REPO_SRC/graphite.pub ]]; then
   # graphite-keyring takes over key management (rotation/revocation via package updates);
   # installed from the local copy, the remote may not be reachable during install
   for k in "$REPO_SRC"/graphite-keyring-*.pkg.tar.zst; do
-    if [[ -f $k ]]; then arch-chroot "$MNT" pacman -U --noconfirm "/var/lib/graphite/repo/${k##*/}"; fi
+    if [[ -f $k ]]; then achroot "$MNT" pacman -U --noconfirm "/var/lib/graphite/repo/${k##*/}"; fi
   done
 fi
 [[ -n ${GRAPHITE_CACHE_SERVER:-} ]] && sed -i "/^\[\(core\|extra\|multilib\)\]$/a CacheServer = $GRAPHITE_CACHE_SERVER" "$MNT/etc/pacman.conf"
@@ -180,14 +291,32 @@ if ((SERIAL)); then
   printf 'GRUB_TERMINAL="console serial"\nGRUB_SERIAL_COMMAND="serial --speed=115200"\n' >> "$MNT/etc/default/grub"
 fi
 
+step "User account and locale"
 ARGS=(--user "$USERNAME" --profile "$PROFILE")
 ((NVIDIA)) && ARGS+=(--nvidia)
-arch-chroot "$MNT" useradd -m -G wheel -s /bin/bash "$USERNAME"
-printf '%s:%s\n' "$USERNAME" "$PASSWORD" | arch-chroot "$MNT" chpasswd
-arch-chroot "$MNT" passwd -l root >/dev/null
-arch-chroot "$MNT" locale-gen >/dev/null
-arch-chroot "$MNT" systemctl enable NetworkManager.service >/dev/null
-GRAPHITE_PATH=/var/lib/graphite/src arch-chroot "$MNT" /var/lib/graphite/src/install.sh "${ARGS[@]}"
+achroot "$MNT" useradd -m -G wheel -s /bin/bash "$USERNAME"
+printf '%s:%s\n' "$USERNAME" "$PASSWORD" | achroot "$MNT" chpasswd
+achroot "$MNT" passwd -l root >/dev/null
+achroot "$MNT" locale-gen >/dev/null
+achroot "$MNT" systemctl enable NetworkManager.service >/dev/null
+# carry the live session's network over so the first boot is online (idea from archinstall's
+# copy_iso_network_config): NetworkManager profiles (Wi-Fi joined in the live bar/nmcli) and iwd psk files
+if compgen -G "/etc/NetworkManager/system-connections/*" >/dev/null; then
+  install -d -m 700 "$MNT/etc/NetworkManager/system-connections"
+  cp -a /etc/NetworkManager/system-connections/. "$MNT/etc/NetworkManager/system-connections/"
+fi
+# networks joined with plain iwctl: turn iwd's WPA-PSK files into NetworkManager profiles
+for f in /var/lib/iwd/*.psk; do
+  [[ -f $f ]] || continue
+  ssid=$(basename "$f" .psk); pass=$(sed -n 's/^Passphrase=//p' "$f" | head -1)
+  [[ -n $pass && $ssid != =* ]] || continue   # hex-encoded SSIDs / raw keys: skip
+  nmf="$MNT/etc/NetworkManager/system-connections/$ssid.nmconnection"; [[ -e $nmf ]] && continue
+  install -d -m 700 "${nmf%/*}"
+  ( umask 077; printf '[connection]\nid=%s\ntype=wifi\n\n[wifi]\nssid=%s\nmode=infrastructure\n\n[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' "$ssid" "$ssid" "$pass" > "$nmf" )
+done
+step "Graphite packages and setup (install.sh)"
+achroot "$MNT" getent hosts "$NET_HOST" >/dev/null || { [[ ${GRAPHITE_SKIP_NET_CHECK:-0} == 1 ]] || die "DNS does not work inside the install chroot ($NET_HOST); $NO_NET_MSG"; }
+GRAPHITE_PATH=/var/lib/graphite/src achroot "$MNT" /var/lib/graphite/src/install.sh "${ARGS[@]}"
 if [[ -n $SNAPSHOT ]]; then
   # back to live mirrors for updates (security fixes must keep flowing)
   sed -i -E 's|^Server = https://archive\.archlinux\.org/repos/.*|Include = /etc/pacman.d/mirrorlist|' "$MNT/etc/pacman.conf"
@@ -202,17 +331,19 @@ else
   sed -i "/^\[options\]/a IgnorePkg   = $HYPR_HOLD" "$MNT/etc/pacman.conf"
 fi
 
-log "Bootloader (GRUB, UEFI, removable path + NVRAM entry)"
-arch-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Graphite >/dev/null 2>&1 \
+step "Bootloader (GRUB, UEFI, removable path + NVRAM entry)"
+achroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Graphite >/dev/null 2>&1 \
   || echo "note: NVRAM entry not written (fine in VMs); removable path is used"
-arch-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --removable >/dev/null
+achroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --removable >/dev/null
 # Plymouth splash (graphite theme, LUKS prompt on the splash). Skipped for serial
 # test installs, where the passphrase is typed on the serial console.
 if ((SERIAL == 0)); then
-  arch-chroot "$MNT" graphite splash on --no-rebuild || log "warning: boot splash not enabled"
+  step "Boot splash"
+  achroot "$MNT" graphite splash on --no-rebuild || log "warning: boot splash not enabled"
 fi
-arch-chroot "$MNT" mkinitcpio -P >/dev/null
-arch-chroot "$MNT" grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
+step "Initramfs and GRUB menu"
+achroot "$MNT" mkinitcpio -P >/dev/null
+achroot "$MNT" grub-mkconfig -o /boot/grub/grub.cfg >/dev/null
 
 if [[ -n $SELFTEST ]]; then
   log "Installing self-test hook (testing only)"
@@ -231,9 +362,12 @@ StandardError=journal+console
 [Install]
 WantedBy=multi-user.target
 UNIT
-  arch-chroot "$MNT" systemctl enable graphite-selftest.service >/dev/null
+  achroot "$MNT" systemctl enable graphite-selftest.service >/dev/null
 fi
 
+step "Finishing"
+restore_dns
 sync; umount -R "$MNT"; cryptsetup close cryptroot
-log "Graphite installed on $DISK. Remove the ISO and reboot."
+trap - EXIT
+STEP=$((STEPS - 1)); step "Graphite installed on $DISK. Remove the ISO and reboot."
 echo "GRAPHITE-INSTALL: OK"

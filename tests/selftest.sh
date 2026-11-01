@@ -37,6 +37,9 @@ common_checks() {
   check "power-profiles-daemon active" 'systemctl is-active power-profiles-daemon'
   check "fwupd + arch-audit installed" 'pacman -Q fwupd arch-audit'
   check "grub-btrfsd active" 'systemctl is-active grub-btrfsd'
+  check "resolv.conf is not the installer's temporary one" '! grep -q "graphite-iso-install: temporary" /etc/resolv.conf'
+  check "nsswitch hosts restored (resolve)" 'grep -q "^hosts:.*resolve" /etc/nsswitch.conf'
+  check "DNS works on the installed system" 'timeout 20 getent hosts archive.archlinux.org'
   say "diag sddm: $(systemctl is-enabled sddm.service 2>&1) / $(readlink /etc/systemd/system/display-manager.service 2>&1) / $(pacman -Q sddm 2>&1)"
   check "sddm enabled" 'systemctl is-enabled sddm'
   check "[graphite] repo listed after official repos" '[[ $(grep -n "^\[graphite\]" /etc/pacman.conf | cut -d: -f1) -gt $(grep -n "^\[extra\]" /etc/pacman.conf | cut -d: -f1) ]]'

@@ -122,7 +122,7 @@ def qemu(extra, logname, timeout, on_line=None, done=None):
         log.write(chunk); log.flush(); buf = (buf + chunk)[-20000:]
         state["hl"] = state.get("hl", 0) + chunk.count(b"H*")   # GRUB highlight redraws (monotonic)
         text = buf.decode(errors="replace")
-        for m in re.finditer(r"SELFTEST: [^\r\n]*[\r\n]", text):
+        for m in re.finditer(r"(?:SELFTEST|HARNESS-CHECK): [^\r\n]*[\r\n]", text):
             k = ("st", m.group(0))
             if k not in state: state[k] = 1; note(m.group(0).strip())
         if on_line: on_line(text, p, state)
@@ -259,6 +259,8 @@ if not NO_SMOKE and any("SELFTEST: ALL DONE" in open(f, errors="replace").read()
         note("screenshot: not taken")
 allout = "".join(open(f).read() for f in sorted(glob.glob(os.path.join(OUT, "boot-*.log"))))
 fails = sorted(set(re.findall(r"SELFTEST: FAIL[^\r\n]*", allout)))
+instlog = open(os.path.join(OUT, "install.log"), errors="replace").read() if os.path.exists(os.path.join(OUT, "install.log")) else ""
+fails += sorted(set(re.findall(r"HARNESS-CHECK: FAIL[^\r\n]*", instlog)))
 shotlog = open(os.path.join(OUT, "boot-shot.log"), errors="replace").read() if os.path.exists(os.path.join(OUT, "boot-shot.log")) else ""
 fails += sorted(set(re.findall(r"@SMOKE: FAIL[^\r\n]*", shotlog)))
 if "@SMOKE: DONE" not in shotlog and not NO_SMOKE: fails.append("SMOKE: did not finish")

@@ -7,9 +7,12 @@
 #   graphite-installer disks          PATH<TAB>SIZE<TAB>MODEL of installable disks (not the ISO medium)
 #   graphite-installer defaults       timezone/keymap/locale guesses as key=value
 #   graphite-installer answers        read key=value answers on stdin into the 0600 answers file
-#   graphite-installer check          validate the answers file (prints ok or error: ...)
+#   graphite-installer net            internet preflight: ok, or error: No internet: ...
+#   graphite-installer check          validate the answers file + internet (prints ok or error: ...)
 #   graphite-installer start          validate, then run graphite-iso-install in the background
+#                                     (fresh install.log each run; the previous one -> install.log.1)
 #   graphite-installer status         state=idle|running|done|failed, step=N/12, last log line
+#   graphite-installer reset          after a failed run: clear exit + log (answers kept) to try again
 # Answers: $GRAPHITE_INSTALLER_DIR/answers (default /tmp/graphite-installer), mode 0600, key=value:
 #   disk user password luks hostname timezone keymap locale profile nvidia
 set -uo pipefail
@@ -20,9 +23,20 @@ live() { [[ -d /run/archiso ]] || grep -q 'archisobasedir' /proc/cmdline 2>/dev/
 running_win() { pgrep -f 'qs -c graphite-installer' >/dev/null; }
 colors() { local d=$HOME/.config/quickshell/graphite-installer b=$HOME/.config/quickshell/graphite-bar/Colors.qml
   [[ -f $d/Colors.qml || ! -f $b ]] || { mkdir -p "$d"; cp "$b" "$d/Colors.qml"; }; }
-help() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
+help() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 get() { sed -n "s/^$1=//p" "$A" 2>/dev/null | head -1; }
 medium() { local s; s=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null) || return 0; lsblk -no PKNAME "$s" 2>/dev/null | head -1; }
+
+NET_HOST=${GRAPHITE_NET_CHECK_HOST:-archive.archlinux.org}
+NO_NET="No internet: plug in ethernet or connect Wi-Fi (iwctl, or the Wi-Fi menu in the bar)"
+net() {
+  [[ ${GRAPHITE_SKIP_NET_CHECK:-0} == 1 ]] && { echo ok; return 0; }
+  if timeout 15 getent ahosts "$NET_HOST" >/dev/null 2>&1 &&
+     curl -fsS -o /dev/null --connect-timeout 10 --max-time 20 "https://$NET_HOST/" 2>/dev/null; then echo ok
+  else echo "error: $NO_NET"; return 1; fi
+}
+busy() { pgrep -f 'graphite-iso-install' >/dev/null && [[ ! -f $RC ]]; }
+rotate() { [[ -f $LOG ]] && mv -f "$LOG" "$LOG.1"; rm -f "$RC"; true; }
 
 check() {
   [[ -f $A ]] || { echo "error: no answers file"; return 1; }
@@ -38,6 +52,7 @@ check() {
   [[ -z $km || $km =~ ^[a-zA-Z0-9_-]+$ ]] || e+=("keymap: invalid")
   [[ -z $loc || $loc =~ ^[a-zA-Z_]+\.UTF-8$ ]] || e+=("locale: like en_US.UTF-8")
   [[ -z $prof || $prof == full || $prof == desktop ]] || e+=("profile: full or desktop")
+  net >/dev/null || e+=("$NO_NET")
   if ((${#e[@]})); then printf 'error: %s\n' "${e[@]}"; return 1; fi
   echo ok
 }
@@ -56,10 +71,14 @@ case ${1:-} in
     lspci -nn 2>/dev/null | grep -qiE '\[03(00|02)\].*\[10de:' && echo "nvidia=1" || echo "nvidia=0" ;;
   answers) umask 077; mkdir -p "$D"; grep -E '^(disk|user|password|luks|hostname|timezone|keymap|locale|profile|nvidia)=' > "$A"; chmod 600 "$A"; check ;;
   check) check ;;
+  net) net ;;
+  reset)
+    if busy; then echo "error: an install is running"; exit 1; fi
+    rotate; echo "reset" ;;
   start)
-    if [[ -f $LOG && ! -f $RC ]] && pgrep -f 'graphite-iso-install' >/dev/null; then echo "error: an install is already running"; exit 1; fi
+    if busy; then echo "error: an install is already running"; exit 1; fi
     check >/dev/null || { check; exit 1; }
-    umask 077; mkdir -p "$D"; get password > "$D/pw"; get luks > "$D/luks"; rm -f "$RC"
+    umask 077; mkdir -p "$D"; get password > "$D/pw"; get luks > "$D/luks"; rotate
     args=(--disk "$(get disk)" --user "$(get user)" --password-file "$D/pw" --luks-pass-file "$D/luks" --yes
           --hostname "$(get hostname)" --timezone "$(get timezone)" --keymap "$(get keymap)" --locale "$(get locale)" --profile "$(get profile)")
     [[ $(get nvidia) == 1 ]] && args+=(--nvidia)
@@ -75,7 +94,12 @@ case ${1:-} in
   status)
     if [[ -f $RC ]]; then [[ $(cat "$RC") == 0 ]] && echo state=done || echo state=failed
     elif [[ -f $LOG ]]; then echo state=running; else echo state=idle; fi
-    [[ -f $LOG ]] && { echo "step=$(grep -c '==>' "$LOG")/12"; echo "last=$(grep -a '==>\|error' "$LOG" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"; } ;;
+    if [[ -f $LOG ]]; then
+      n=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aoE '^==> \[[0-9]+/12\]' | tail -1 | grep -oE '[0-9]+' | head -1)
+      n=${n:-0}; ((n > 12)) && n=12
+      echo "step=$n/12"
+      echo "last=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -a '^==> \[\|error' | tail -1 | sed 's/^==> \[[0-9]*\/12\] //')"
+    fi ;;
   -h|--help|help) help ;;
   *) help >&2; exit 1 ;;
 esac
