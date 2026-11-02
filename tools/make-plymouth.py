@@ -19,15 +19,12 @@ def logo(size):
     """The Graphite crystal G (tools/crystal_g.py)."""
     return crystal_g.mark(size)
 
-# watermark: logo + wordmark
+# watermark: crystal G above the GRAPHITE wordmark (Chakra Petch Bold, graphite/assets/fonts)
 wm = Image.new("RGBA", (420, 230), (0, 0, 0, 0))
 wm.paste(logo(140), (140, 0), logo(140))
-try:
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
-except OSError:
-    font = ImageFont.load_default()
-d = ImageDraw.Draw(wm); tw = d.textlength("graphite", font=font)
-d.text(((420 - tw) / 2, 168), "graphite", font=font, fill=FG + (255,))
+font = ImageFont.truetype(os.path.join(ROOT, "graphite", "assets", "fonts", "ChakraPetch-Bold.ttf"), 44)
+d = ImageDraw.Draw(wm); tw = d.textlength("GRAPHITE", font=font)
+d.text(((420 - tw) / 2, 160), "GRAPHITE", font=font, fill=(79, 227, 255, 255))
 wm.save(os.path.join(OUT, "watermark.png"))
 
 # throbber: rotating gradient arc, 36 frames
