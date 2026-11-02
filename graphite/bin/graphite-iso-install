@@ -288,10 +288,9 @@ if [[ -f $REPO_SRC/graphite.pub ]]; then
   # remote mirror (base-3): updates come from it, the copy on disk stays as fallback.
   # GRAPHITE_REPO_URL overrides the URL baked into the ISO (graphite.url).
   url=${GRAPHITE_REPO_URL:-$(cat "$REPO_SRC/graphite.url" 2>/dev/null || true)}
-  if [[ -n $url ]]; then
-    log "[graphite] remote repo: $url"
-    sed -i "/^\[graphite\]/,/^\$/s#^Server = file://#Server = $url\nServer = file://#" "$MNT/etc/pacman.conf"
-  fi
+  # added only at the end of the install: during the install every Graphite package comes from
+  # the bundled repo (a remote build with the same version but other bytes fails the checksum)
+  [[ -n $url ]] && log "[graphite] remote repo (added after the install): $url"
   # graphite-keyring takes over key management (rotation/revocation via package updates);
   # installed from the local copy, the remote may not be reachable during install
   for k in "$REPO_SRC"/graphite-keyring-*.pkg.tar.zst; do
@@ -355,6 +354,10 @@ hv=$(achroot "$MNT" pacman -Si hyprland 2>/dev/null | awk '/^Version/{print $3; 
 (( $(achroot "$MNT" vercmp "$hv" 0.57) < 0 )) || die "hyprland $hv would be installed, but Graphite needs < 0.57 (repos not pinned to the archive snapshot?)"
 log "hyprland $hv from ${SNAPSHOT:+archive snapshot $SNAPSHOT}"
 GRAPHITE_PATH=/var/lib/graphite/src achroot "$MNT" /var/lib/graphite/src/install.sh "${ARGS[@]}"
+if [[ -n ${url:-} ]] && [[ -f $REPO_SRC/graphite.pub ]]; then
+  sed -i "/^\[graphite\]/,/^\$/s#^Server = file://#Server = $url\nServer = file://#" "$MNT/etc/pacman.conf"
+  grep -qF "Server = $url" "$MNT/etc/pacman.conf" || die "could not add the remote [graphite] repo to pacman.conf"
+fi
 if [[ -n $SNAPSHOT ]]; then
   # back to live mirrors for updates (security fixes must keep flowing)
   sed -i -E "s|^Server = $ARCHIVE_URL/$SNAPSHOT/.*|Include = /etc/pacman.d/mirrorlist|" "$MNT/etc/pacman.conf"
