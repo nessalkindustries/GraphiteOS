@@ -11,7 +11,7 @@
   "modules-center": ["clock"],
   "modules-right": ["tray", "group/status", "custom/power"],
 
-  "custom/logo": { "format": "󰣇", "tooltip-format": "Apps (Super+Space)", "on-click": "rofi -show drun" },
+  "custom/logo": { "format": " ", "tooltip-format": "Apps (Super+Space)", "on-click": "rofi -show drun" },
   "hyprland/workspaces": {
     "format": "{id}",
     "persistent-workspaces": { "*": 1 },

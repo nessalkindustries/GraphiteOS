@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate the Graphite Plymouth theme (two-step plugin) into graphite/assets/plymouth/graphite."""
-import math, os
+import math, os, sys
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -12,19 +12,12 @@ S = 4  # supersampling
 
 def mix(a, b, t): return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import crystal_g
+
 def logo(size):
-    """Hexagon outline (accent gradient) with a 'G' bar - matches the fastfetch logo."""
-    im = Image.new("RGBA", (size * S, size * S), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    c, r, w = size * S / 2, size * S * 0.44, int(size * S * 0.07)
-    pts = [(c + r * math.cos(math.radians(60 * k - 90)), c + r * math.sin(math.radians(60 * k - 90))) for k in range(7)]
-    mid = ((pts[1][0] + pts[2][0]) / 2, (pts[1][1] + pts[2][1]) / 2)
-    segs = [(mid, pts[2])] + [(pts[k], pts[k + 1]) for k in range(2, 6)]  # open top-right -> a "G"
-    for k, (p0, p1) in enumerate(segs):
-        d.line([p0, p1], fill=mix(A1, A2, k / 5) + (255,), width=w)
-    for p in [mid] + pts[2:7]:
-        d.ellipse([p[0] - w / 2, p[1] - w / 2, p[0] + w / 2, p[1] + w / 2], fill=mix(A1, A2, 0.5) + (255,))
-    d.rectangle([c - w * 0.2, mid[1] - w / 2, mid[0], mid[1] + w / 2], fill=A1 + (255,))  # G crossbar
-    return im.resize((size, size), Image.LANCZOS)
+    """The Graphite crystal G (tools/crystal_g.py)."""
+    return crystal_g.mark(size)
 
 # watermark: logo + wordmark
 wm = Image.new("RGBA", (420, 230), (0, 0, 0, 0))
@@ -64,7 +57,7 @@ cl.save(os.path.join(OUT, "capslock.png"))
 
 open(os.path.join(OUT, "graphite.plymouth"), "w").write("""[Plymouth Theme]
 Name=Graphite
-Description=Graphite boot splash (hexagon logo, teal accent)
+Description=Graphite boot splash (crystal G logo)
 ModuleName=two-step
 
 [two-step]
