@@ -78,7 +78,8 @@ ShellRoot {
 
         ColumnLayout {
             anchors { fill: parent; margins: 28 } spacing: 18
-            Text { text: "Welcome to Graphite"; color: Colors.foreground; font.pixelSize: 26; font.bold: true }
+            Image { source: "file:///usr/share/graphite/branding/graphiteos-lockup.png"; sourceSize.height: 44; Layout.preferredHeight: 44; fillMode: Image.PreserveAspectFit }
+            Text { text: "Welcome to Graphite"; color: Colors.foreground; font.family: "Chakra Petch"; font.pixelSize: 26; font.bold: true }
             RowLayout { spacing: 8   // step indicator
                 Repeater { model: root.steps
                     Rectangle { required property string modelData; required property int index
