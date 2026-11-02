@@ -197,6 +197,8 @@ ShellRoot {
 
                 // About
                 Head { text: "About"; visible: root.page === "about" }
+                Image { visible: root.page === "about"; source: "file:///usr/share/icons/hicolor/scalable/apps/graphiteos.svg"
+                    sourceSize.width: 72; sourceSize.height: 72; Layout.preferredWidth: 72; Layout.preferredHeight: 72 }
                 Repeater { model: [["os", "System"], ["version", "Graphite config"], ["kernel", "Kernel"], ["host", "Hostname"], ["cpu", "Processor"], ["memory", "Memory"], ["gpu", "Graphics"]]
                     RowLayout { required property var modelData; visible: root.page === "about"; spacing: 16
                         Text { text: modelData[1]; color: Colors.muted; font.pixelSize: 14; Layout.preferredWidth: 150 }

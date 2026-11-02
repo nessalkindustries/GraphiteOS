@@ -21,7 +21,7 @@ Rectangle {
 
     Image {
         anchors.fill: parent
-        source: "/usr/share/backgrounds/graphite/graphite-teal.png"
+        source: "/usr/share/backgrounds/graphite/graphite-crystal.png"
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
     }
