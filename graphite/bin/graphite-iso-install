@@ -286,6 +286,12 @@ CMDLINE="cryptdevice=UUID=$LUKS_UUID:cryptroot root=/dev/mapper/cryptroot rootfl
 sed -i -e "s#^GRUB_CMDLINE_LINUX_DEFAULT=.*#GRUB_CMDLINE_LINUX_DEFAULT=\"$CMDLINE\"#" \
        -e 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' -e 's/^#\?GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=false/' \
        -e 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Graphite"/' -e 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' "$MNT/etc/default/grub"
+# crystal G GRUB background on the ESP (GRUB reads /boot directly, no cryptodisk needed)
+if [[ -f $MNT/usr/share/graphite/branding/grub-background.png ]]; then
+  install -Dm644 "$MNT/usr/share/graphite/branding/grub-background.png" "$MNT/boot/grub/graphite-background.png"
+  sed -i -E 's|^#?GRUB_BACKGROUND=.*|GRUB_BACKGROUND="/boot/grub/graphite-background.png"|' "$MNT/etc/default/grub"
+  grep -q '^GRUB_BACKGROUND=' "$MNT/etc/default/grub" || echo 'GRUB_BACKGROUND="/boot/grub/graphite-background.png"' >> "$MNT/etc/default/grub"
+fi
 grep -q '^GRUB_DISABLE_SUBMENU' "$MNT/etc/default/grub" || echo 'GRUB_DISABLE_SUBMENU=y' >> "$MNT/etc/default/grub"
 if ((SERIAL)); then
   printf 'GRUB_TERMINAL="console serial"\nGRUB_SERIAL_COMMAND="serial --speed=115200"\n' >> "$MNT/etc/default/grub"
