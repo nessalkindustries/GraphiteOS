@@ -33,6 +33,10 @@ fi
 GRAPHITE_COMMIT=${GRAPHITE_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}
 GRAPHITE_IMAGE=${GRAPHITE_IMAGE:-docker.io/archlinux/archlinux@sha256:ef1b2d7b71ac9f1f5fe78b5ae66c3b3fa8f6f2a4486620233b7ed31b1d0c3aaf}
 GRAPHITE_ARCHISO=${GRAPHITE_ARCHISO:-91-1}
+# Installs are pinned to a tested archive day; default it so a plain ./build.sh cannot ship an
+# unpinned installer (GRAPHITE_SNAPSHOT=live opts out explicitly, installs then need GRAPHITE_ALLOW_LIVE_MIRRORS=1)
+GRAPHITE_SNAPSHOT=${GRAPHITE_SNAPSHOT-2026/10/23}
+[ "$GRAPHITE_SNAPSHOT" = live ] && GRAPHITE_SNAPSHOT=""
 export GRAPHITE_COMMIT SOURCE_DATE_EPOCH GRAPHITE_SNAPSHOT=${GRAPHITE_SNAPSHOT:-} GRAPHITE_SIGN_KEY=${GRAPHITE_SIGN_KEY:-} GRAPHITE_REPO_URL=${GRAPHITE_REPO_URL:-}
 
 if [ "$CONTAINER" = 1 ]; then
