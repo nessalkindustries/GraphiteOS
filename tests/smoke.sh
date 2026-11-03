@@ -331,14 +331,24 @@ graphite-installer open; sleep 8
 # slow TCG VMs can take 30s+ to map the window and start the IPC server
 for _ in $(seq 1 30); do timeout 10 hyprctl clients | grep -q "title: Install Graphite" && timeout 10 qs ipc -c graphite-installer call installer diskCount >/dev/null 2>&1 && break; sleep 2; done
 check "installer: window opens" 'timeout 10 hyprctl clients | grep -q "title: Install Graphite"'
-timeout 10 qs ipc -c graphite-installer call installer testMode >/dev/null 2>&1
-timeout 10 qs ipc -c graphite-installer call installer step 1 >/dev/null 2>&1; sleep 3
+# slow-VM flake (summary check saw the window still on Disk): every IPC call is retried until qs ipc
+# succeeds, and each step is confirmed through the window's own state (current/error) before moving on
+gi_ipc() { local i; for i in $(seq 1 10); do timeout 10 qs ipc -c graphite-installer call installer "$@" 2>/dev/null && return 0; sleep 2; done; return 1; }
+gi_step() { local i; for i in $(seq 1 15); do gi_ipc step "$1" >/dev/null; [ "$(gi_ipc current)" = "$2" ] && return 0; sleep 2; done; echo "installer: window never reached step $2 (at $(gi_ipc current))" >&2; return 1; }
+gi_ipc testMode >/dev/null; gi_ipc testMode >/dev/null   # no getter: two acknowledged calls (idempotent)
+gi_step 1 Disk; sleep 2
 echo "SMOKE: SHOT installer-disk"; sleep 3
 check "installer: window sees disks" '[ "$(timeout 10 qs ipc -c graphite-installer call installer diskCount)" -ge 1 ]'
-timeout 10 qs ipc -c graphite-installer call installer fill "$(graphite-installer disks | head -1 | cut -f1)" tester pw 12345678 >/dev/null 2>&1
-timeout 10 qs ipc -c graphite-installer call installer step 5 >/dev/null 2>&1; sleep 2
+gi_d=$(graphite-installer disks | head -1 | cut -f1)
+gi_ipc fill "$gi_d" tester pw 12345678 >/dev/null
+gi_step 5 Summary; sleep 2
 echo "SMOKE: SHOT installer-summary"; sleep 2
-timeout 10 qs ipc -c graphite-installer call installer confirm >/dev/null 2>&1; sleep 4
+# confirm runs `graphite-installer answers` asynchronously: poll for its verdict, re-fill + re-confirm on a stale/empty answer
+for _ in $(seq 1 6); do
+  gi_ipc confirm >/dev/null
+  for _ in $(seq 1 15); do sleep 2; gi_ipc error | grep -q "test mode" && break 2; done
+  gi_ipc testMode >/dev/null; gi_ipc fill "$gi_d" tester pw 12345678 >/dev/null; gi_step 5 Summary
+done
 check "installer: summary validates without installing (test mode)" 'timeout 10 qs ipc -c graphite-installer call installer error | grep -q "test mode" && [ "$(graphite-installer status | head -1)" = state=idle ] && ! pgrep -f graphite-iso-install'
 graphite-installer close; sleep 2; rm -rf /tmp/gi-smoke; unset GRAPHITE_INSTALLER_DIR
 echo "SMOKE: DONE fails=$fails"
