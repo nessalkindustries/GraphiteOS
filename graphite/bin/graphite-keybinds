@@ -3,8 +3,35 @@
 # "# Section" comment above them, shown in rofi (or printed outside a session).
 # A trailing "# text" comment on a bind line is used as its description.
 set -euo pipefail
-CONF=${1:-$HOME/.config/hypr/hyprland.conf}
+# Hyprland >= 0.57 (Lua): `hl.bind("KEYS", ...) -- text` lines under "-- Section" comments.
+CONF=${1:-}
+if [[ -z $CONF ]]; then
+  CONF=$HOME/.config/hypr/hyprland.conf
+  [[ -f $HOME/.config/hypr/hyprland.lua && $(graphite-hypr-config check 2>/dev/null) == lua ]] && CONF=$HOME/.config/hypr/hyprland.lua
+fi
+list_lua() {
+  awk '
+    /^-- [A-Z][A-Za-z ]+$/ { hdr=substr($0, 4); next }
+    /^[[:space:]]*hl\.bind\("/ {
+      line=$0; desc=""
+      if (index(line, ") -- ")) desc=substr(line, index(line, ") -- ")+5)
+      else if (index(line, " -- ")) desc=substr(line, index(line, " -- ")+4)
+      keys=line; sub(/^[[:space:]]*hl\.bind\("/, "", keys); sub(/".*$/, "", keys)
+      n=split(keys, f, /[[:space:]]*\+[[:space:]]*/); k=f[n]; mods=""
+      for (i=1;i<n;i++) mods=mods (mods=="" ? "" : " + ") f[i]
+      gsub(/SUPER/, "Super", mods); gsub(/SHIFT/, "Shift", mods); gsub(/CTRL/, "Ctrl", mods); gsub(/ALT/, "Alt", mods)
+      sub(/^Return$/, "Enter", k); sub(/^period$/, ".", k); sub(/^mouse:272$/, "Left drag", k)
+      sub(/^mouse:273$/, "Right drag", k); sub(/^mouse_down$/, "Scroll down", k); sub(/^mouse_up$/, "Scroll up", k)
+      sub(/^XF86/, "", k)
+      key=(mods=="" ? k : mods " + " k)
+      act=(desc != "" ? desc : "?")
+      if (seen[act]++) next
+      if (hdr != "") { printf "%s── %s\n", (shown ? "\n" : ""), hdr; hdr=""; shown=1 }
+      printf "  %-24s %s\n", key, act
+    }' "$CONF"
+}
 list() {
+  [[ $CONF == *.lua ]] && { list_lua; return; }
   awk '
     /^[[:space:]]*\$mod[[:space:]]*=/ { split($0, a, "="); gsub(/[[:space:]]/, "", a[2]); mod=a[2] }
     /^# [A-Z][A-Za-z ]+$/ { hdr=substr($0, 3); next }

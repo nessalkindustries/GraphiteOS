@@ -2,7 +2,8 @@
 # Pick the Hyprland config format for the installed Hyprland:
 #   < 0.57: ~/.config/hypr/hyprland.conf (hyprlang, shipped in /etc/skel) - nothing to do
 #   >= 0.57: legacy .conf support is removed upstream (PR #15539); install hyprland.lua next to it
-# Usage: graphite-hypr-config [check|apply]   (check prints conf|lua)
+# Usage: graphite-hypr-config [check|apply|provider]
+#   check: conf|lua for the installed Hyprland; provider: hyprlang|lua for the running session
 set -euo pipefail
 SHARE=${GRAPHITE_SHARE:-/usr/share/graphite}
 HYPR=${XDG_CONFIG_HOME:-$HOME/.config}/hypr
@@ -12,11 +13,15 @@ fmt=conf
 if [[ -n $ver ]]; then IFS=. read -r ma mi <<<"$ver"; (( ma > 0 || mi >= 57 )) && fmt=lua; fi
 case ${1:-apply} in
   check) echo "$fmt" ;;
+  provider)   # running session: `hyprctl status -j` has configProvider since 0.55; older = hyprlang
+    p=$(timeout 5 hyprctl status -j 2>/dev/null | sed -n 's/.*"configProvider"[^"]*"\([a-z]*\)".*/\1/p' | head -1)
+    [[ -n $p ]] || { [[ $fmt = lua ]] && p=lua || p=hyprlang; }
+    echo "$p" ;;
   apply)
     [[ $fmt = lua ]] || exit 0
     mkdir -p "$HYPR"
     # never overwrite a user's own Lua config
     [[ -f $HYPR/hyprland.lua ]] || install -m644 "$SHARE/templates/hypr-lua/hyprland.lua" "$HYPR/hyprland.lua"
     ;;
-  *) echo "usage: graphite-hypr-config [check|apply]" >&2; exit 2 ;;
+  *) echo "usage: graphite-hypr-config [check|apply|provider]" >&2; exit 2 ;;
 esac
