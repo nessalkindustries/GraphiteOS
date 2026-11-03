@@ -30,3 +30,6 @@ tooltip label { color: @foreground; }
 #pulseaudio.muted, #network.disconnected { color: @muted; }
 #custom-power { color: @red; font-family: "JetBrainsMono Nerd Font"; font-size: 14px; padding: 0 13px 0 12px; }
 #custom-power:hover, #custom-logo:hover { background: alpha(@accent, 0.18); }
+/* crystal G launcher mark (graphite-config ships the icon) */
+#custom-logo { background-image: url("/usr/share/icons/hicolor/scalable/apps/graphiteos.svg"); background-size: 16px 16px;
+  background-position: center; background-repeat: no-repeat; min-width: 16px; }

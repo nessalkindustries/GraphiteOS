@@ -29,10 +29,10 @@ render() {
     v[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}
   done < "$dir/colors.toml"
   # derived values
-  wp=${v[wallpaper]:-graphite.png}
+  wp=${v[wallpaper]:-graphite-crystal.png}
   [[ $wp == /* ]] || wp="/usr/share/backgrounds/graphite/$wp"
   [[ -f $dir/$(basename "$wp") ]] && wp="$dir/$(basename "$wp")"
-  [[ -f $wp ]] || wp=/usr/share/backgrounds/graphite/graphite.png
+  [[ -f $wp ]] || wp=/usr/share/backgrounds/graphite/graphite-crystal.png
   mode=${v[mode]:-dark}
   v[wallpaper_path]=$wp
   v[home]=$HOME

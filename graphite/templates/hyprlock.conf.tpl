@@ -39,6 +39,17 @@ label {
     halign = center
     valign = center
 }
+# branding
+label {
+    monitor =
+    text = GRAPHITE
+    color = rgb({{accent.hex}})
+    font_size = 16
+    font_family = Chakra Petch Bold
+    position = 0, 40
+    halign = center
+    valign = bottom
+}
 input-field {
     monitor =
     size = 320, 52

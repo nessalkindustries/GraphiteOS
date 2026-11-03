@@ -21,7 +21,7 @@ Rectangle {
 
     Image {
         anchors.fill: parent
-        source: "/usr/share/backgrounds/graphite/graphite-teal.png"
+        source: "/usr/share/backgrounds/graphite/graphite-crystal.png"
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
     }
@@ -131,5 +131,9 @@ Rectangle {
             MouseArea { anchors.fill: parent; onClicked: sddm.powerOff() }
         }
     }
-    // no wordmark here: the wallpaper already carries "graphite" (it showed twice)
+    // Graphite lockup (crystal G + Chakra Petch wordmark) under the screen, small
+    Image {
+        anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 36
+        source: "file:///usr/share/graphite/branding/graphiteos-lockup.png"; sourceSize.height: 40; fillMode: Image.PreserveAspectFit; opacity: 0.9
+    }
 }

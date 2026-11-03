@@ -197,6 +197,8 @@ ShellRoot {
 
                 // About
                 Head { text: "About"; visible: root.page === "about" }
+                Image { visible: root.page === "about"; source: "file:///usr/share/graphite/branding/graphiteos-lockup.png"
+                    sourceSize.height: 64; Layout.preferredHeight: 64; fillMode: Image.PreserveAspectFit }
                 Repeater { model: [["os", "System"], ["version", "Graphite config"], ["kernel", "Kernel"], ["host", "Hostname"], ["cpu", "Processor"], ["memory", "Memory"], ["gpu", "Graphics"]]
                     RowLayout { required property var modelData; visible: root.page === "about"; spacing: 16
                         Text { text: modelData[1]; color: Colors.muted; font.pixelSize: 14; Layout.preferredWidth: 150 }

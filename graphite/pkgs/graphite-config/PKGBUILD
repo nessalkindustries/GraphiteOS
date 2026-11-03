@@ -3,11 +3,11 @@
 # Never overwrites files owned by other packages (rule: overlay, not replacement).
 pkgname=graphite-config
 pkgver=0.3.0
-pkgrel=23
+pkgrel=25
 pkgdesc="Graphite defaults: CLI, themes, user config skeleton, system drop-ins"
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"
-license=(MIT)
+license=(MIT OFL-1.1)
 depends=(bash curl python sudo nftables zram-generator power-profiles-daemon
          snapper snap-pac grub-btrfs inotify-tools pacman-contrib reflector
          fwupd arch-audit)
@@ -33,6 +33,17 @@ package() {
   install -Dm644 -t "$pkgdir/etc/skel/.local/share/dbus-1/services" "$src"/dbus-services/*.service
   # assets
   install -Dm644 -t "$pkgdir/usr/share/backgrounds/graphite" "$src"/assets/backgrounds/*
+  # crystal G: os-release LOGO=graphiteos, launcher/bar icon, pixmap
+  install -Dm644 "$src/assets/branding/graphiteos.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/graphiteos.svg"
+  install -Dm644 "$src/assets/branding/graphiteos.svg" "$pkgdir/usr/share/pixmaps/graphiteos.svg"
+  install -Dm644 "$src/assets/branding/graphiteos-256.png" "$pkgdir/usr/share/pixmaps/graphiteos.png"
+  for f in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "$src/assets/branding/graphiteos-$f.png" "$pkgdir/usr/share/icons/hicolor/${f}x$f/apps/graphiteos.png"
+  done
+  install -Dm644 -t "$share/branding" "$src"/assets/branding/graphiteos-{lockup,wordmark}.png "$src/assets/branding/grub-background.png"
+  # Graphite OS wordmark font (Chakra Petch Bold, SIL OFL 1.1): branding titles only
+  install -Dm644 "$src/assets/fonts/ChakraPetch-Bold.ttf" "$pkgdir/usr/share/fonts/graphite/ChakraPetch-Bold.ttf"
+  install -Dm644 "$src/assets/fonts/OFL-ChakraPetch.txt" "$pkgdir/usr/share/licenses/$pkgname/OFL-ChakraPetch.txt"
   install -Dm644 "$src/assets/fastfetch/logo.txt" "$share/fastfetch/logo.txt"
   install -Dm644 -t "$pkgdir/usr/share/plymouth/themes/graphite" "$src"/assets/plymouth/graphite/*
   install -d "$pkgdir/usr/share/sddm/themes/graphite"

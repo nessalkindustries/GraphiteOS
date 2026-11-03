@@ -53,6 +53,6 @@ case ${1:-} in
   -h|--help) echo "usage: graphite-fetch [fastfetch args] | os|theme|browser|palette|font|age|updated" ;;
   *) # narrow terminal: logo above the boxes instead of beside them
     c=$(stty size 2>/dev/null </dev/tty | cut -d" " -f2); [[ $c =~ ^[0-9]+$ ]] || c=${COLUMNS:-120}
-    if ((c < 90)); then exec fastfetch --logo-position top "$@"; fi
+    if ((c < 92)); then exec fastfetch --logo-position top "$@"; fi
     exec fastfetch "$@" ;;
 esac

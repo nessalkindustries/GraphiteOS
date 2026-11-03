@@ -89,8 +89,9 @@ ShellRoot {
                 RowLayout {
                     anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
                     spacing: 8
-                    Glyph {
-                        text: "󰣇"; color: Colors.accent; font.pixelSize: 17
+                    Image {  // crystal G (graphite-config ships it in hicolor)
+                        source: "file:///usr/share/icons/hicolor/scalable/apps/graphiteos.svg"
+                        sourceSize.width: 18; sourceSize.height: 18; Layout.preferredWidth: 18; Layout.preferredHeight: 18
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: launcher.toggle() }
                     }
                     Row {
