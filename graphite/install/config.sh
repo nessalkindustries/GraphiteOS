@@ -19,3 +19,5 @@ while IFS= read -r -d '' src; do
 done < <(find "$src_root" -type f -print0)
 # Generate theme-dependent files (~/.config/graphite/current) for the default theme.
 if command -v graphite-theme >/dev/null; then as_user graphite-theme apply || warn "theme apply failed"; fi
+# Hyprland >= 0.57 only reads hyprland.lua: install it next to hyprland.conf (no-op on 0.56)
+if command -v graphite-hypr-config >/dev/null; then as_user graphite-hypr-config apply || warn "hyprland.lua setup failed"; fi

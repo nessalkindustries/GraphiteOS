@@ -67,6 +67,13 @@ for it in root.iter("item"):
   fi
 }
 
+unhold_hypr() {   # drop the TEMPORARY IgnorePkg hold the 0.56-era installer wrote
+  grep -q '^# TEMPORARY hold until the hyprland.lua port' /etc/pacman.conf 2>/dev/null || return 0
+  echo "--- Hyprland 0.57 is supported now: removing the old Hyprland IgnorePkg hold from /etc/pacman.conf"
+  sudo sed -i -e '/^# TEMPORARY hold until the hyprland.lua port/{N;s/^.*\nIgnorePkg   = hyprland [^\n]*$/#IgnorePkg   =/}' /etc/pacman.conf
+  sudo sed -i -E '/^IgnorePkg   = hyprland hyprutils hyprlang /d' /etc/pacman.conf
+}
+
 update() {
   local yes=0 news=1
   while (($#)); do
@@ -85,6 +92,8 @@ update() {
     snapn=$(sudo snapper -c root create -c number -p -d "graphite update $(date +%F_%H:%M)" 2>/dev/null) &&
       echo "--- pre-update snapshot: #$snapn (undo with: graphite rollback $snapn)"
   fi
+  # Graphite <= 0.3.0-25 held the Hyprland 0.56 stack (hyprland.conf); the Lua port lifts it
+  unhold_hypr
   local pacargs=(-Syu)
   ((yes)) && pacargs+=(--noconfirm)
   # new or rotated repo keys must be in the keyring before packages signed with them
@@ -95,6 +104,8 @@ update() {
   sudo pacman "${pacargs[@]}"
   date +%s > "$STATE_DIR/last-update"
   graphite-migrate
+  # Hyprland may have crossed 0.57 in this update: make sure Graphite's hyprland.lua is in place
+  command -v graphite-hypr-config >/dev/null && graphite-hypr-config apply || true
   echo "--- configuration files needing attention (.pacnew/.pacsave):"
   if command -v pacdiff >/dev/null; then
     out=$(pacdiff -o 2>/dev/null || true)
@@ -235,7 +246,7 @@ bar() {
         # started, retry, and as a last resort start it here so the switch never silently no-ops
         local want=qs other=waybar ok=0; [[ $1 == waybar ]] && { want=waybar; other=qs; }
         for _ in 1 2 3; do
-          timeout 15 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+          timeout 15 graphite-hypr-dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
           for _ in $(seq 30); do pgrep -f '(^|/)graphite-bar --restart' >/dev/null && { ok=1; break 2; }; sleep 0.5; done
         done
         ((ok)) || setsid -f graphite-bar --restart >/dev/null 2>&1

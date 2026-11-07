@@ -25,6 +25,6 @@ if [[ -f $h ]] && ! grep -qE '^bind[a-z]* *= *\$mod, *A,' "$h"; then
   sed -i '0,/^bind = \$mod, K, exec, graphite-keybinds/s//bind = $mod, A, exec, graphite-control                       # Control center (volume, Wi-Fi, ...)\n&/' "$h"
 fi
 if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && pgrep -x qs >/dev/null; then
-  timeout 10 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+  timeout 10 graphite-hypr-dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
 fi
 true

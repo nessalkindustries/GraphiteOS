@@ -28,6 +28,20 @@ write() {  # regenerate settings.conf from the stored values (+ one override)
     echo "    sensitivity = $S_sensitivity"; echo "    follow_mouse = $S_follow_mouse"
     echo "    touchpad {"; echo "        natural_scroll = $S_natural_scroll"; echo "    }"
     echo "}"; } > "$tmp" && mv -f "$tmp" "$CONF"
+  write_lua
+}
+# Hyprland >= 0.57 (Lua config): same values as settings.lua, required last by hyprland.lua
+LUA="${CONF%.conf}.lua"
+luastr() { local v=${1//\\/\\\\}; printf '"%s"' "${v//\"/\\\"}"; }
+write_lua() {
+  local tmp sc; tmp=$(mktemp "$LUA.XXXX"); sc=$([[ $S_scale == auto ]] && echo 1 || echo "$S_scale")
+  { echo "-- Written by graphite-settings (Settings app / \`graphite settings set\`). Edit with those."
+    echo "hl.monitor({ output = \"\", mode = \"preferred\", position = \"auto\", scale = $sc })"
+    echo "hl.config({ input = {"
+    echo "    kb_layout = $(luastr "$S_kb_layout"), kb_variant = $(luastr "$S_kb_variant"),"
+    echo "    sensitivity = $S_sensitivity, follow_mouse = $S_follow_mouse,"
+    echo "    touchpad = { natural_scroll = $S_natural_scroll },"
+    echo "} })"; } > "$tmp" && mv -f "$tmp" "$LUA"
 }
 valid() {
   case $1 in
@@ -51,6 +65,16 @@ apply() {
     kb_variant) [[ -n $v ]] && kw="input:kb_variant $v" ;;
     scale) kw="monitor ,preferred,auto,$([[ $v == auto ]] && echo 1 || echo "$v")" ;;
   esac
+  if [[ $(graphite-hypr-config provider 2>/dev/null) == lua ]]; then   # 0.57+: no `keyword`, use eval
+    case $k in
+      sensitivity|follow_mouse) kw="hl.config({ input = { $k = $v } })" ;;
+      kb_layout|kb_variant) kw="hl.config({ input = { $k = $(luastr "$v") } })" ;;
+      natural_scroll) kw="hl.config({ input = { touchpad = { natural_scroll = $v } } })" ;;
+      scale) kw="hl.monitor({ output = \"\", mode = \"preferred\", position = \"auto\", scale = $([[ $v == auto ]] && echo 1 || echo "$v") })" ;;
+    esac
+    timeout 30 hyprctl eval "$kw" 2>/dev/null | grep -qx ok && return 0
+    timeout 60 hyprctl reload config-only >/dev/null 2>&1 || true; return 0
+  fi
   if [[ -n ${kw:-} ]] && timeout 30 hyprctl keyword $kw 2>/dev/null | grep -qx ok; then return 0; fi
   timeout 60 hyprctl reload config-only >/dev/null 2>&1 || true
 }
@@ -63,7 +87,7 @@ case ${1:-open} in
     d=$HOME/.config/quickshell/graphite-settings; b=$HOME/.config/quickshell/graphite-bar/Colors.qml
     [[ -f $d/Colors.qml || ! -f $b ]] || { mkdir -p "$d"; cp "$b" "$d/Colors.qml"; }
     setsid -f qs -c graphite-settings >/dev/null 2>&1 ;;
-  init) [[ -f $CONF ]] || write "" "" ;;   # defaults, so hyprland.conf's source line always resolves
+  init) [[ -f $CONF && -f $LUA ]] || write "" "" ;;   # defaults, so hyprland.conf's source line always resolves
   keys) printf '%s\n' scale kb_layout kb_variant sensitivity natural_scroll follow_mouse ;;
   get)
     if [[ -n ${2:-} ]]; then [[ -v DEF[$2] ]] || { echo "unknown key: $2" >&2; exit 1; }; val "$2"; exit; fi

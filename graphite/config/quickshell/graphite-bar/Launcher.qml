@@ -42,7 +42,7 @@ PanelWindow {
     readonly property var commands: [
         { name: "Lock screen", icon: "system-lock-screen", cmd: "hyprlock" },
         { name: "Power menu", icon: "system-shutdown", cmd: "graphite-menu power" },
-        { name: "Log out", icon: "system-log-out", cmd: "hyprctl dispatch exit" },
+        { name: "Log out", icon: "system-log-out", cmd: "graphite-hypr-dispatch exit" },
         { name: "Reboot", icon: "system-reboot", cmd: "systemctl reboot" },
         { name: "Shut down", icon: "system-shutdown", cmd: "systemctl poweroff" },
         { name: "Update system", icon: "system-software-update", cmd: "kitty --hold graphite update" },
