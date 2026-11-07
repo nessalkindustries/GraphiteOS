@@ -41,7 +41,7 @@ for _ in $(seq 60); do timeout 10 hyprctl clients -j 2>/dev/null | grep -q "\"ti
 echo "SMOKE: SHOT firstboot"; sleep 5
 check "first-boot setup opens at the first login" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup"'
 hlog() { tail -c 200000 "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.log" 2>/dev/null | grep -aiE "$1" | tail -${2:-6} | tr '\n' '|' | cut -c1-900; }
-echo "SMOKE: diag firstboot: procs=[$(pgrep -af 'qs -c|graphite-firstboot|graphite-welcome|hypridle|polkit' | tr '\n' '|' | cut -c1-300)] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ' | cut -c1-300)] plain=[$(timeout 10 hyprctl clients 2>/dev/null | head -4 | tr '\n\t' '  ' | cut -c1-200)] log=[$(hlog 'exec|firstboot|error|lua' 10)]"
+echo "SMOKE: diag firstboot: procs=[$(pgrep -af 'qs -c|graphite-firstboot|graphite-welcome|hypridle|polkit' | tr '\n' '|' | cut -c1-300)] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ' | cut -c1-300)] plain=[$(timeout 10 hyprctl clients 2>/dev/null | head -4 | tr '\n\t' '  ' | cut -c1-200)] log=[$(hlog 'Executing|firstboot|error' 10)] autostart=[$(journalctl -b -t graphite-autostart --no-pager -o cat 2>/dev/null | tail -3 | tr '\n' '|')]"
 check "first-boot: not marked done yet" '[ "$(graphite-firstboot status)" = done=no ]'
 timeout 10 qs ipc -c graphite-firstboot call firstboot step 2 >/dev/null 2>&1; sleep 3
 echo "SMOKE: SHOT firstboot-privacy"; sleep 3

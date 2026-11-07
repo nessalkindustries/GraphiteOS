@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Session autostart for the Lua config (Hyprland >= 0.57), once per Hyprland instance.
+# hyprland.lua calls this from hl.on("hyprland.start"), and at config load, since
+# relying on the start event alone left the session without first-boot setup/hypridle on 0.57.1.
+# Each client waits until the compositor accepts Wayland clients (graphite-hypr-wait).
+inst=${HYPRLAND_INSTANCE_SIGNATURE:-}
+for _ in $(seq 100); do   # at config load the instance may not be listed yet
+  [[ -n $inst ]] && break; sleep 0.2
+  inst=$(hyprctl instances -j 2>/dev/null | sed -n 's/.*"instance": *"\([^"]*\)".*/\1/p' | head -1)
+done
+[[ -n $inst ]] || inst=none
+mark=${XDG_RUNTIME_DIR:-/run/user/$UID}/graphite-autostart-$inst
+mkdir "$mark" 2>/dev/null || exit 0      # already ran for this instance (atomic)
+logger -t graphite-autostart "starting session clients (instance ${inst:-?})" 2>/dev/null || true
+run() { setsid -f graphite-hypr-wait "$@" >/dev/null 2>&1 < /dev/null; }
+run graphite-bar
+run graphite-wallpaper
+run hypridle
+run sh -c '[ -f ~/.config/graphite/privacy/no-clipboard ] || exec wl-paste --watch cliphist store'
+run /usr/lib/polkit-kde-authentication-agent-1
+run graphite-welcome
+run graphite-firstboot auto     # guided setup until finished once
+run graphite-installer auto     # live ISO only: graphical installer
