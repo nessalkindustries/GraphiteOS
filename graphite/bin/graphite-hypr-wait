@@ -2,12 +2,20 @@
 # graphite-hypr-wait CMD...: start CMD once the Hyprland session is ready for Wayland clients.
 # Hyprland 0.57 fires hl.on("hyprland.start") early: clients started there could find no
 # compositor socket yet (WAYLAND_DISPLAY unset/not listening) and exit, e.g. the first-boot setup.
-for _ in $(seq 100); do
+RT=${XDG_RUNTIME_DIR:-/run/user/$UID}; export XDG_RUNTIME_DIR=$RT
+# processes spawned while Hyprland parses its config may lack HYPRLAND_INSTANCE_SIGNATURE and
+# WAYLAND_DISPLAY (then hyprctl cannot even find the instance): take the newest instance dir
+if [[ -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+  HYPRLAND_INSTANCE_SIGNATURE=$(ls -1t "$RT/hypr" 2>/dev/null | head -1); export HYPRLAND_INSTANCE_SIGNATURE
+fi
+for _ in $(seq 900); do   # up to 3 min: a slow VM takes long to bring up the first output
   if [[ -z ${WAYLAND_DISPLAY:-} ]]; then
     WAYLAND_DISPLAY=$(hyprctl instances -j 2>/dev/null | sed -n 's/.*"wl_socket": *"\([^"]*\)".*/\1/p' | head -1)
+    [[ -n $WAYLAND_DISPLAY ]] || WAYLAND_DISPLAY=$(cd "$RT" 2>/dev/null && ls -1t wayland-[0-9]* 2>/dev/null | grep -v lock | head -1)
     [[ -n $WAYLAND_DISPLAY ]] && export WAYLAND_DISPLAY
   fi
   [[ -n ${WAYLAND_DISPLAY:-} && -S ${XDG_RUNTIME_DIR:-/run/user/$UID}/$WAYLAND_DISPLAY ]] && hyprctl monitors >/dev/null 2>&1 && break
   sleep 0.2
 done
+logger -t graphite-autostart "start: $* (WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset})" 2>/dev/null || true
 exec "$@"

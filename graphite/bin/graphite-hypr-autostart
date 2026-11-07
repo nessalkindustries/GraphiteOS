@@ -4,12 +4,14 @@
 # relying on the start event alone left the session without first-boot setup/hypridle on 0.57.1.
 # Each client waits until the compositor accepts Wayland clients (graphite-hypr-wait).
 inst=${HYPRLAND_INSTANCE_SIGNATURE:-}
-for _ in $(seq 100); do   # at config load the instance may not be listed yet
+for _ in $(seq 900); do   # at config load the instance may not be listed yet
   [[ -n $inst ]] && break; sleep 0.2
-  inst=$(hyprctl instances -j 2>/dev/null | sed -n 's/.*"instance": *"\([^"]*\)".*/\1/p' | head -1)
+  inst=$(ls -1t "${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr" 2>/dev/null | head -1)
+  [[ -n $inst ]] || inst=$(hyprctl instances -j 2>/dev/null | sed -n 's/.*"instance": *"\([^"]*\)".*/\1/p' | head -1)
 done
 [[ -n $inst ]] || inst=none
 mark=${XDG_RUNTIME_DIR:-/run/user/$UID}/graphite-autostart-$inst
+export HYPRLAND_INSTANCE_SIGNATURE=$inst
 mkdir "$mark" 2>/dev/null || exit 0      # already ran for this instance (atomic)
 logger -t graphite-autostart "starting session clients (instance ${inst:-?})" 2>/dev/null || true
 run() { setsid -f graphite-hypr-wait "$@" >/dev/null 2>&1 < /dev/null; }
