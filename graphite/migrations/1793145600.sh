@@ -47,7 +47,7 @@ fi
 m=$HOME/.config/mako/config
 [[ -f $m ]] && ! grep -q '^\[mode=do-not-disturb\]' "$m" && printf '\n[mode=do-not-disturb]\ninvisible=1\n' >> "$m"
 # hand notifications to the bar now
-if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && pgrep -x qs >/dev/null; then
+if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && pgrep -f "^qs -c graphite-bar( |$)" >/dev/null; then
   timeout 10 graphite-hypr-dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
 fi
 true

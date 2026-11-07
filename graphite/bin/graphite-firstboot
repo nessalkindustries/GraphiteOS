@@ -21,6 +21,38 @@ colors() {   # palette comes from graphite-theme render; copy the bar's if this 
   [[ -f $d/Colors.qml || ! -f $b ]] || { mkdir -p "$d"; cp "$b" "$d/Colors.qml"; }
 }
 open_win() { colors; running || setsid -f "${QS[@]}" >/dev/null 2>&1; }
+# Autostart path: start the window under a small supervisor that logs qs output and exit status
+# to the journal (tag graphite-autostart) and retries once if no "Graphite Setup" window shows up.
+alog() { logger -t graphite-autostart "firstboot: $*" 2>/dev/null || true; }
+has_win() { timeout 10 hyprctl clients -j 2>/dev/null | grep -q '"title": "Graphite Setup"'; }
+supervise() {
+  local attempt pid rc
+  for attempt in 1 2; do
+    [[ -f $DONE ]] && { alog "marked done, not opening"; return 0; }
+    colors
+    if running; then alog "already running"; else
+      alog "attempt $attempt: starting ${QS[*]}"
+      ( "${QS[@]}" > >(logger -t graphite-autostart 2>/dev/null) 2>&1; rc=$?; alog "qs exited with status $rc"; exit "$rc" ) &
+      pid=$!
+    fi
+    for _ in $(seq 60); do
+      if has_win; then
+        alog "attempt $attempt: window is up"
+        [[ -n ${pid:-} ]] || return 0
+        wait "$pid" 2>/dev/null; rc=$?; pid=
+        # closed normally, or finished/skipped: done. Killed or crashed before DONE: relaunch (cap 2)
+        { ((rc == 0)) || [[ -f $DONE ]]; } && return 0
+        alog "attempt $attempt: qs ended with status $rc before setup was finished"
+        continue 2
+      fi
+      sleep 3
+    done
+    [[ -f $DONE ]] && return 0
+    alog "attempt $attempt: no Graphite Setup window after 180s"
+    close_win; [[ -n ${pid:-} ]] && wait "$pid" 2>/dev/null; pid=
+  done
+  alog "giving up after 2 attempts (open it with: graphite firstboot open)"; return 1
+}
 close_win() { pkill -f 'qs -c graphite-firstboot' 2>/dev/null; true; }
 
 pget() { [[ -f $PRIV/no-$1 ]] && echo off || echo on; }
@@ -43,7 +75,9 @@ pset() {
 }
 
 case ${1:-open} in
-  auto) [[ -f $DONE ]] && exit 0; live && exit 0; open_win ;;
+  auto) [[ -f $DONE ]] && exit 0; live && exit 0
+        setsid -f "$0" _supervise >/dev/null 2>&1 < /dev/null ;;
+  _supervise) supervise ;;
   open) open_win ;;
   close) close_win ;;
   status) [[ -f $DONE ]] && echo "done=yes" || echo "done=no" ;;

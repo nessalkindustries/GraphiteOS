@@ -11,7 +11,7 @@
 state=${XDG_STATE_HOME:-$HOME/.local/state}/graphite/dnd
 bar() { b=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar" 2>/dev/null); [[ $b == waybar ]] && echo waybar || echo quickshell; }
 ipc() { timeout 20 qs ipc -c graphite-bar call notifications "$@" 2>/dev/null; }
-qsup() { [[ $(bar) == quickshell ]] && pgrep -x qs >/dev/null; }
+qsup() { [[ $(bar) == quickshell ]] && pgrep -f "^qs -c graphite-bar( |$)" >/dev/null; }
 case ${1:-center} in
   center|toggle|open|close)
     c=${1:-center}; [[ $c == center ]] && c=toggle

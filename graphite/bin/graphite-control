@@ -13,7 +13,7 @@
 set -u
 state=${XDG_STATE_HOME:-$HOME/.local/state}/graphite
 ipc() { timeout 20 qs ipc -c graphite-bar call control "$@" 2>/dev/null; }
-qsup() { b=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar" 2>/dev/null); [[ $b != waybar ]] && pgrep -x qs >/dev/null; }
+qsup() { b=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar" 2>/dev/null); [[ $b != waybar ]] && pgrep -f "^qs -c graphite-bar( |$)" >/dev/null; }
 onoff() { case $1 in on|off) echo "$1" ;; toggle) [[ $2 == on ]] && echo off || echo on ;; *) return 1 ;; esac; }
 
 volume() { local v; v=$(timeout 15 wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)

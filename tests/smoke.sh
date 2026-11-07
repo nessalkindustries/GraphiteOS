@@ -37,11 +37,16 @@ hyprcfg() { if [ "$(graphite-hypr-config check)" = lua ]; then head -1 ~/.config
 echo "SMOKE: diag hyprland: $(hyprctl version 2>&1 | head -1 | cut -c1-120) provider: $(hlprov) lua-config: $([ -f ~/.config/hypr/hyprland.lua ] && head -1 ~/.config/hypr/hyprland.lua | cut -c1-40 || echo none) configerrors: $(timeout 10 hyprctl configerrors 2>&1 | head -3 | tr '\n' ' ' | cut -c1-200) binds: $(timeout 10 hyprctl binds 2>/dev/null | grep -c '^bind')"
 check "CONFIG: Graphite hyprland config loaded (Graphite hyprland.lua on 0.57+, binds present)" '(for _ in 1 2 3 4 5; do hyprcfg && exit 0; sleep 10; done; exit 1)'   # hyprctl can stall under TCG load
 # first-boot setup (desk-7): opens at the first login, then never again once finished
+# the idle lock must not race the first-boot check on a slow VM: stop hypridle and unlock if it already locked
+pkill -x hypridle 2>/dev/null; pgrep -x hyprlock >/dev/null && { echo "SMOKE: diag hyprlock was up before first-boot check: unlocking"; pkill -USR1 -x hyprlock; sleep 3; }
 for _ in $(seq 60); do timeout 10 hyprctl clients -j 2>/dev/null | grep -q "\"title\": \"Graphite Setup" && break; sleep 3; done
 echo "SMOKE: SHOT firstboot"; sleep 5
-check "first-boot setup opens at the first login" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup"'
+# recheck once the bar has settled: a bar (re)start right after login must not take the window with it
+barup 90 >/dev/null 2>&1; sleep 5
+check "first-boot setup opens at the first login" '(for _ in 1 2 3; do timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup" && exit 0; sleep 5; done; exit 1)'
+echo "SMOKE: diag firstboot bar journal: $(journalctl -b -t graphite-bar --no-pager -o short-monotonic 2>/dev/null | tail -20 | tr '\n' '|' | cut -c1-2000)"
 hlog() { tail -c 200000 "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.log" 2>/dev/null | grep -aiE "$1" | tail -${2:-6} | tr '\n' '|' | cut -c1-900; }
-echo "SMOKE: diag firstboot: procs=[$(pgrep -af 'qs -c|graphite-firstboot|graphite-welcome|hypridle|polkit' | tr '\n' '|' | cut -c1-300)] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ' | cut -c1-300)] plain=[$(timeout 10 hyprctl clients 2>/dev/null | head -4 | tr '\n\t' '  ' | cut -c1-200)] log=[$(hlog 'Executing|firstboot|error' 10)] autostart=[$(journalctl -b -t graphite-autostart --no-pager -o cat 2>/dev/null | tail -3 | tr '\n' '|')]"
+echo "SMOKE: diag firstboot: procs=[$(pgrep -af 'qs -c|graphite-firstboot|graphite-welcome|hypridle|polkit' | tr '\n' '|' | cut -c1-300)] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ' | cut -c1-300)] plain=[$(timeout 10 hyprctl clients 2>/dev/null | head -4 | tr '\n\t' '  ' | cut -c1-200)] log=[$(hlog 'Executing|firstboot|error' 10)] autostart=[$(journalctl -b -t graphite-autostart --no-pager -o cat 2>/dev/null | tr '\n' '|' | cut -c1-3000)]"
 check "first-boot: not marked done yet" '[ "$(graphite-firstboot status)" = done=no ]'
 timeout 10 qs ipc -c graphite-firstboot call firstboot step 2 >/dev/null 2>&1; sleep 3
 echo "SMOKE: SHOT firstboot-privacy"; sleep 3
@@ -118,7 +123,7 @@ timeout 180 graphite-theme set graphite-teal >/dev/null 2>&1 || echo "SMOKE: dia
 echo "SMOKE: diag t=$(date +%T) teal switch returned"
 barup 30; echo "SMOKE: diag t=$(date +%T) barup done"
 echo "SMOKE: diag waybar after teal: $(wbtree) units=$(timeout 10 systemctl --user list-units --all 'waybar*' --no-legend 2>/dev/null|tr -s ' '|cut -c1-80)"
-check "bar back after switching to graphite-teal" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ]'
+check "bar back after switching to graphite-teal" 'barup 5 && [ "$(pgrep -cf "^qs -c graphite-bar( |$)")" = 1 ]'
 echo "SMOKE: diag after teal: qs=[$(pgrep -a qs | tr "\n" "|" | cut -c1-300)] barns=$(timeout 10 hyprctl layers 2>&1 | grep -c "namespace: $BARNS,")"
 pgrep -x qs >/dev/null || echo "SMOKE: diag bar log: $(tail -5 $wblog 2>/dev/null | tr '\n' '|')"
 # launcher (desk-2): search through IPC, then open it the way Super+Space does
@@ -252,7 +257,7 @@ check "launcher falls back to rofi with Waybar" '(for _ in 1 2 3; do timeout 10 
 pkill -x rofi 2>/dev/null; sleep 2
 timeout 900 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
 BARNS=graphite-bar; barup 90
-check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'
+check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cf "^qs -c graphite-bar( |$)")" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'
 # settings app (desk-6): graphite-settings backend + Quickshell window (Super+I)
 check "settings: settings.conf is generated and sourced" '[ -f ~/.config/graphite/settings.conf ] && grep -q "^source = ~/.config/graphite/settings.conf" ~/.config/hypr/hyprland.conf && { [ "$(graphite-hypr-config check)" != lua ] || { [ -f ~/.config/graphite/settings.lua ] && grep -q "graphite/settings\"" ~/.config/hypr/hyprland.lua; }; }'
 check "Super+I is bound to Settings" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: i$" | grep -qE "(arg|description): graphite-settings" && exit 0; sleep 3; done; exit 1)'
@@ -267,7 +272,8 @@ check "settings: about reports the system" 'timeout 30 graphite-settings about |
 timeout 10 graphite-hypr-dispatch exec "graphite-settings open" >/dev/null 2>&1
 for _ in $(seq 40); do timeout 10 hyprctl clients -j 2>/dev/null | grep -q "\"title\": \"Graphite Settings" && break; sleep 3; done
 echo "SMOKE: SHOT settings"; sleep 5
-check "settings window opens" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Settings"'
+check "settings window opens" '(for _ in 1 2 3 4 5 6; do timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Settings" && exit 0; sleep 5; done; exit 1)'
+echo "SMOKE: diag settings window: procs=[$(pgrep -af 'qs -c' | tr '\n' '|')] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ')] bar=[$(journalctl -b -t graphite-bar --no-pager 2>/dev/null | tail -6 | tr '\n' '|' | cut -c1-900)]"
 timeout 10 qs ipc -c graphite-settings call settings page about >/dev/null 2>&1; sleep 3
 echo "SMOKE: SHOT settings-about"; sleep 3
 timeout 10 qs ipc -c graphite-settings call settings page store >/dev/null 2>&1; sleep 5

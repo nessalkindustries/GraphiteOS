@@ -7,7 +7,7 @@
 ipc() { timeout 20 qs ipc -c graphite-bar call launcher "$@" 2>/dev/null; }
 case ${1:-toggle} in
   toggle|open|close)
-    if pgrep -x qs >/dev/null; then
+    if pgrep -f "^qs -c graphite-bar( |$)" >/dev/null; then
       ipc "${1:-toggle}"; rc=$?
       # 0: done; 124: Quickshell is busy (do not open a second launcher); other: the running
       # config has no launcher (an edited shell.qml), so use rofi.

@@ -27,7 +27,7 @@ if [[ -f $h ]]; then
   sed -i 's/^\$menu = rofi -show drun$/$menu = graphite-launcher/' "$h"
 fi
 # reload the bar so the launcher is available now
-if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && pgrep -x qs >/dev/null; then
+if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && pgrep -f "^qs -c graphite-bar( |$)" >/dev/null; then
   timeout 10 graphite-hypr-dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
 fi
 true
