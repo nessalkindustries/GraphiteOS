@@ -236,7 +236,7 @@ bar() {
   case ${1:-status} in
     status)
       echo "bar: $cur$([[ -f $f ]] || echo " (default)")"
-      if pgrep -x qs >/dev/null; then echo "running: quickshell"; elif pgrep -x waybar >/dev/null; then echo "running: waybar"; else echo "running: none"; fi ;;
+      if pgrep -f "^qs -c graphite-bar( |$)" >/dev/null; then echo "running: quickshell"; elif pgrep -x waybar >/dev/null; then echo "running: waybar"; else echo "running: none"; fi ;;
     quickshell|waybar)
       mkdir -p "${f%/*}"; echo "$1" > "$f"
       echo "bar set to $1"

@@ -32,10 +32,21 @@ supervise() {
     colors
     if running; then alog "already running"; else
       alog "attempt $attempt: starting ${QS[*]}"
-      ( "${QS[@]}" > >(logger -t graphite-autostart 2>/dev/null) 2>&1; rc=$?; alog "qs exited with status $rc" ) &
+      ( "${QS[@]}" > >(logger -t graphite-autostart 2>/dev/null) 2>&1; rc=$?; alog "qs exited with status $rc"; exit "$rc" ) &
       pid=$!
     fi
-    for _ in $(seq 60); do has_win && { alog "attempt $attempt: window is up"; wait "${pid:-}" 2>/dev/null; return 0; }; sleep 3; done
+    for _ in $(seq 60); do
+      if has_win; then
+        alog "attempt $attempt: window is up"
+        [[ -n ${pid:-} ]] || return 0
+        wait "$pid" 2>/dev/null; rc=$?; pid=
+        # closed normally, or finished/skipped: done. Killed or crashed before DONE: relaunch (cap 2)
+        { ((rc == 0)) || [[ -f $DONE ]]; } && return 0
+        alog "attempt $attempt: qs ended with status $rc before setup was finished"
+        continue 2
+      fi
+      sleep 3
+    done
     [[ -f $DONE ]] && return 0
     alog "attempt $attempt: no Graphite Setup window after 180s"
     close_win; [[ -n ${pid:-} ]] && wait "$pid" 2>/dev/null; pid=

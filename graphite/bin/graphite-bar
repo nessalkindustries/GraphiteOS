@@ -17,8 +17,11 @@ exec 8>"$rt/graphite-bar.lock"; flock -w 120 8 || true
 choice() { local b; b=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/graphite/bar" 2>/dev/null); [[ $b == waybar ]] && echo waybar || echo quickshell; }
 bar=$(choice)
 # quickshell runs as `qs` (layer namespace graphite-bar, see ~/.config/quickshell/graphite-bar/shell.qml)
-if [[ $bar == quickshell ]]; then proc=qs ns=graphite-bar other=waybar cmd='exec qs -c graphite-bar'
-else proc=waybar ns=waybar other=qs cmd='exec waybar'; fi
+# match by command line, never by bare name: other Graphite windows (first-boot, settings,
+# installer) are `qs` processes too and must not be stopped or counted as the bar
+qspat='^qs -c graphite-bar( |$)' wbpat='^waybar( |$)'
+if [[ $bar == quickshell ]]; then proc=qs pat=$qspat ns=graphite-bar other=waybar opat=$wbpat cmd='exec qs -c graphite-bar'
+else proc=waybar pat=$wbpat ns=waybar other=qs opat=$qspat cmd='exec waybar'; fi
 cur=$rt/$proc.cur
 # hyprctl sometimes answers empty under load: only an answer that lists layers counts as "not mapped"
 mapped() { local o; for _ in 1 2 3; do o=$(timeout 5 hyprctl layers 2>/dev/null); grep -q 'namespace:' <<<"$o" && break; sleep 1; done; grep -q "namespace: $ns," <<<"$o"; }
@@ -29,36 +32,36 @@ settle=${GRAPHITE_BAR_SETTLE:-15}
 missed() { grep -q 'initial .configure' "$cur" 2>/dev/null; }
 stable() { for ((k = 0; k < settle; k++)); do missed && return 1; mapped || return 1; sleep 1; done; ! missed; }
 say() { echo "graphite-bar $(date +%T): $*" >>"$log"; logger -t graphite-bar -- "$*" 2>/dev/null; }
-stop() {   # stop <process name>
-  pkill -x "$1" 2>/dev/null
-  for _ in $(seq 25); do pgrep -x "$1" >/dev/null || break; sleep 0.2; done
-  pkill -9 -x "$1" 2>/dev/null
+stop() {   # stop <command-line pattern> (pgrep -f), so only that program is hit
+  pkill -f "$1" 2>/dev/null
+  for _ in $(seq 25); do pgrep -f "$1" >/dev/null || break; sleep 0.2; done
+  pkill -9 -f "$1" 2>/dev/null
 }
 # 8>&-: waybar must not inherit the lock fd, or it holds the lock for its lifetime and every
 # --restart (theme switch) blocks for the whole flock timeout
 # shellcheck disable=SC2016  # $1 expands in the inner sh
 start() { : >"$cur"; setsid -f sh -c "$cmd"' >>"$1" 2>&1' sh "$cur" 8>&-; }
-pgrep -x "$other" >/dev/null && { say "stopping $other (bar is $bar)"; stop "$other"; }
+pgrep -f "$opat" >/dev/null && { say "stopping $other (bar is $bar)"; stop "$opat"; }
 # notifications: the Quickshell bar is the notification daemon; mako only runs with Waybar
 if [[ $bar == quickshell ]]; then
-  pgrep -x mako >/dev/null && { say "stopping mako (Quickshell shows notifications)"; stop mako; }
+  pgrep -x mako >/dev/null && { say "stopping mako (Quickshell shows notifications)"; stop '^mako( |$)'; }
 elif ! pgrep -x mako >/dev/null; then
   setsid -f mako >/dev/null 2>&1 8>&-
   dndf=${XDG_STATE_HOME:-$HOME/.local/state}/graphite/dnd
   [[ -e $dndf ]] && (sleep 2; makoctl mode -a do-not-disturb >/dev/null 2>&1) &
 fi
-[[ ${1:-} == --restart ]] && { say "restart requested"; stop "$proc"; }
+[[ ${1:-} == --restart ]] && { say "restart requested"; stop "$pat"; }
 for ((i = 1; i <= tries; i++)); do
-  if ! pgrep -x "$proc" >/dev/null; then say "starting $proc (try $i/$tries)"; start; fi
+  if ! pgrep -f "$pat" >/dev/null; then say "starting $proc (try $i/$tries)"; start; fi
   for ((s = 0; s < wait * 2; s++)); do
     mapped && stable && { say "$proc mapped and stable for ${settle}s (try $i)"; [[ $bar == quickshell ]] && pkill -x mako 2>/dev/null; cat "$cur" >>"$log" 2>/dev/null; exit 0; }
     if missed; then say "missed initial configure"; break; fi
     # waybar exited (e.g. early in the first login): restart now instead of idling out this try
-    if ((s > 2)) && ! pgrep -x "$proc" >/dev/null; then say "$proc exited: $(tail -2 "$cur" 2>/dev/null | tr '\n' ' ')"; break; fi
+    if ((s > 2)) && ! pgrep -f "$pat" >/dev/null; then say "$proc exited: $(tail -2 "$cur" 2>/dev/null | tr '\n' ' ')"; break; fi
     sleep 0.5
   done
   cat "$cur" >>"$log" 2>/dev/null
-  say "$proc not mapped (try $i), restarting"; stop "$proc"
+  say "$proc not mapped (try $i), restarting"; stop "$pat"
 done
-say "giving up after $tries tries"; pgrep -x "$proc" >/dev/null || start
+say "giving up after $tries tries"; pgrep -f "$pat" >/dev/null || start
 exit 1
