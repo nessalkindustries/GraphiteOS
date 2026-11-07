@@ -97,7 +97,7 @@ reload_desktop() {
   # was never restarted). Confirm the restart started; retry, and as a last resort start it here.
   started=
   for _ in 1 2 3; do
-    timeout 15 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+    timeout 15 graphite-hypr-dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
     for _ in $(seq 20); do pgrep -f 'graphite-bar --restart' >/dev/null && { started=1; break 2; }; sleep 0.5; done
   done
   [ -n "$started" ] || setsid -f graphite-bar --restart >/dev/null 2>&1 </dev/null
@@ -109,7 +109,7 @@ reload_desktop() {
   pkill -SIGUSR1 -x kitty 2>/dev/null || true       # kitty reloads its config
   # new wallpaper: restart the wallpaper daemon detached from this shell
   pkill -x hyprpaper 2>/dev/null || true; pkill -x swaybg 2>/dev/null || true
-  hyprctl dispatch exec graphite-wallpaper >/dev/null 2>&1 || true   # in the compositor session, not the caller's
+  graphite-hypr-dispatch exec graphite-wallpaper >/dev/null 2>&1 || true   # in the compositor session, not the caller's
 }
 
 store() {  # NAME<TAB>description<TAB>installed|available, from the synced graphite repo db

@@ -52,9 +52,9 @@ H notify-send -a Graphite -t 1 x >/dev/null 2>&1; H makoctl dismiss -a 2>/dev/nu
 H rofi -show drun & sleep 25; shot launcher; pkill -x rofi; sleep 8
 H graphite-menu power & sleep 20; shot menu-power 10; pkill -x rofi; sleep 8
 H graphite-keybinds & sleep 20; shot keybinds 10; pkill -x rofi; sleep 8
-H hyprctl dispatch exec "kitty --hold graphite-fetch" >/dev/null; sleep 25
-H hyprctl dispatch exec "kitty --hold graphite-fetch" >/dev/null; sleep 25
-H hyprctl dispatch exec "kitty" >/dev/null; sleep 30
+H graphite-hypr-dispatch exec "kitty --hold graphite-fetch" >/dev/null; sleep 25
+H graphite-hypr-dispatch exec "kitty --hold graphite-fetch" >/dev/null; sleep 25
+H graphite-hypr-dispatch exec "kitty" >/dev/null; sleep 30
 shot terminals 12
 for t in graphite-nord graphite-mocha graphite-light graphite-amber graphite-violet graphite-teal; do
   H graphite-theme set "$t"; sleep 45

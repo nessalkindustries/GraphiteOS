@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Run a Hyprland dispatcher with the syntax the running session understands.
+# Hyprland 0.57+ (Lua config) only takes Lua dispatcher objects (`hl.dsp.exec_cmd("kitty")`);
+# the old form (`dispatch exec kitty`) fails there with no visible error. 0.56 keeps the old form.
+# Usage: graphite-hypr-dispatch exec CMD... | exit | dpms on|off|toggle | workspace e+1|e-1|N
+set -u
+lq() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | sed -e ':a;N;$!ba;s/\n/\\n/g')"; }
+[[ $# -ge 1 ]] || { echo "usage: graphite-hypr-dispatch exec CMD | exit | dpms on|off | workspace W" >&2; exit 2; }
+op=$1; shift; arg="$*"
+if [[ $(graphite-hypr-config provider 2>/dev/null) == lua ]]; then
+  case $op in
+    exec) expr="hl.dsp.exec_cmd($(lq "$arg"))" ;;
+    exit) expr="hl.dsp.exit()" ;;
+    dpms) expr="hl.dsp.dpms($(lq "$arg"))" ;;
+    workspace) [[ $arg =~ ^-?[0-9]+$ ]] && expr="hl.dsp.focus({ workspace = $arg })" || expr="hl.dsp.focus({ workspace = $(lq "$arg") })" ;;
+    *) echo "graphite-hypr-dispatch: unknown dispatcher $op" >&2; exit 2 ;;
+  esac
+  out=$(hyprctl dispatch "$expr" 2>&1); rc=$?
+  # dpms: some builds want a table argument
+  if [[ $op == dpms && $out != ok ]]; then out=$(hyprctl dispatch "hl.dsp.dpms({ action = $(lq "$arg") })" 2>&1); rc=$?; fi
+else
+  if [[ -n $arg ]]; then out=$(hyprctl dispatch "$op" "$arg" 2>&1); else out=$(hyprctl dispatch "$op" 2>&1); fi; rc=$?
+fi
+[[ $out == ok ]] && exit 0
+echo "graphite-hypr-dispatch: $op: $out" >&2; exit $(( rc ? rc : 1 ))

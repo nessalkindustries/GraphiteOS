@@ -28,6 +28,6 @@ if [[ -f $h ]]; then
 fi
 # reload the bar so the launcher is available now
 if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && pgrep -x qs >/dev/null; then
-  timeout 10 hyprctl dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
+  timeout 10 graphite-hypr-dispatch exec "graphite-bar --restart" >/dev/null 2>&1 || true
 fi
 true

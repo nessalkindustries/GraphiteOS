@@ -15,8 +15,8 @@
   "hyprland/workspaces": {
     "format": "{id}",
     "persistent-workspaces": { "*": 1 },
-    "on-scroll-up": "hyprctl dispatch workspace e-1",
-    "on-scroll-down": "hyprctl dispatch workspace e+1"
+    "on-scroll-up": "graphite-hypr-dispatch workspace e-1",
+    "on-scroll-down": "graphite-hypr-dispatch workspace e+1"
   },
   "clock": {
     "format": "{:%a %d %b  %H:%M}",

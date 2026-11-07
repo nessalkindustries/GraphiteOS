@@ -46,4 +46,10 @@ n2=$(HOME=$t/home "$LUA" "$t/stub.lua" graphite/templates/hypr-lua/hyprland.lua)
 a=$(PATH=$PWD/graphite/bin:$PATH WAYLAND_DISPLAY= graphite/bin/graphite-keybinds graphite/config/hypr/hyprland.conf | sort)
 b=$(PATH=$PWD/graphite/bin:$PATH WAYLAND_DISPLAY= graphite/bin/graphite-keybinds graphite/templates/hypr-lua/hyprland.lua | sort)
 [[ -n $b && $a == "$b" ]] && ok "Super+K list identical for .conf and .lua ($(grep -c . <<<"$b") lines)" || { bad "Super+K lists differ"; diff <(echo "$a") <(echo "$b") || true; }
+# graphite-hypr-dispatch: Lua dispatcher syntax under the Lua provider, round-trips quoting
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> %s/hc.log; [ "$1" = status ] && echo "{\\"configProvider\\": \\"lua\\"}"; [ "$1" = dispatch ] && echo ok; exit 0\n' "$t" > "$t/bin/hyprctl"
+cmd='kitty -e sh -c "echo \"hi\" $HOME"'
+PATH=$t/bin:$PWD/graphite/bin:$PATH graphite/bin/graphite-hypr-dispatch exec "$cmd"
+sed -n 's/^dispatch hl.dsp.exec_cmd(\(.*\))$/return \1/p' "$t/hc.log" > "$t/q.lua"
+[[ $("$LUA" -e "io.write(dofile('$t/q.lua'))") == "$cmd" ]] && ok "dispatch exec quotes commands for Lua" || bad "dispatch exec quoting"
 exit $fail
