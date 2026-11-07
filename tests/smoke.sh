@@ -37,11 +37,13 @@ hyprcfg() { if [ "$(graphite-hypr-config check)" = lua ]; then head -1 ~/.config
 echo "SMOKE: diag hyprland: $(hyprctl version 2>&1 | head -1 | cut -c1-120) provider: $(hlprov) lua-config: $([ -f ~/.config/hypr/hyprland.lua ] && head -1 ~/.config/hypr/hyprland.lua | cut -c1-40 || echo none) configerrors: $(timeout 10 hyprctl configerrors 2>&1 | head -3 | tr '\n' ' ' | cut -c1-200) binds: $(timeout 10 hyprctl binds 2>/dev/null | grep -c '^bind')"
 check "CONFIG: Graphite hyprland config loaded (Graphite hyprland.lua on 0.57+, binds present)" '(for _ in 1 2 3 4 5; do hyprcfg && exit 0; sleep 10; done; exit 1)'   # hyprctl can stall under TCG load
 # first-boot setup (desk-7): opens at the first login, then never again once finished
+# the idle lock must not race the first-boot check on a slow VM: stop hypridle and unlock if it already locked
+pkill -x hypridle 2>/dev/null; pgrep -x hyprlock >/dev/null && { echo "SMOKE: diag hyprlock was up before first-boot check: unlocking"; pkill -USR1 -x hyprlock; sleep 3; }
 for _ in $(seq 60); do timeout 10 hyprctl clients -j 2>/dev/null | grep -q "\"title\": \"Graphite Setup" && break; sleep 3; done
 echo "SMOKE: SHOT firstboot"; sleep 5
 check "first-boot setup opens at the first login" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup"'
 hlog() { tail -c 200000 "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.log" 2>/dev/null | grep -aiE "$1" | tail -${2:-6} | tr '\n' '|' | cut -c1-900; }
-echo "SMOKE: diag firstboot: procs=[$(pgrep -af 'qs -c|graphite-firstboot|graphite-welcome|hypridle|polkit' | tr '\n' '|' | cut -c1-300)] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ' | cut -c1-300)] plain=[$(timeout 10 hyprctl clients 2>/dev/null | head -4 | tr '\n\t' '  ' | cut -c1-200)] log=[$(hlog 'Executing|firstboot|error' 10)] autostart=[$(journalctl -b -t graphite-autostart --no-pager -o cat 2>/dev/null | tail -3 | tr '\n' '|')]"
+echo "SMOKE: diag firstboot: procs=[$(pgrep -af 'qs -c|graphite-firstboot|graphite-welcome|hypridle|polkit' | tr '\n' '|' | cut -c1-300)] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ' | cut -c1-300)] plain=[$(timeout 10 hyprctl clients 2>/dev/null | head -4 | tr '\n\t' '  ' | cut -c1-200)] log=[$(hlog 'Executing|firstboot|error' 10)] autostart=[$(journalctl -b -t graphite-autostart --no-pager -o cat 2>/dev/null | tr '\n' '|' | cut -c1-3000)]"
 check "first-boot: not marked done yet" '[ "$(graphite-firstboot status)" = done=no ]'
 timeout 10 qs ipc -c graphite-firstboot call firstboot step 2 >/dev/null 2>&1; sleep 3
 echo "SMOKE: SHOT firstboot-privacy"; sleep 3
