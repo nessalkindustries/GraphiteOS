@@ -109,11 +109,11 @@ ShellRoot {
                                     anchors.centerIn: parent; text: index + 1; font.pixelSize: 11; font.bold: active
                                     color: active ? Colors.accentText : Colors.muted
                                 }
-                                MouseArea { anchors.fill: parent; onClicked: Hyprland.dispatch("workspace " + (index + 1)) }
+                                MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached(["graphite-hypr-dispatch", "workspace", String(index + 1)]) }
                             }
                         }
                         WheelHandler {
-                            onWheel: e => Hyprland.dispatch(e.angleDelta.y > 0 ? "workspace e-1" : "workspace e+1")
+                            onWheel: e => Quickshell.execDetached(["graphite-hypr-dispatch", "workspace", e.angleDelta.y > 0 ? "e-1" : "e+1"])
                         }
                     }
                 }
