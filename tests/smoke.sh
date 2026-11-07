@@ -35,7 +35,7 @@ check "hyprctl answers" 'hyprctl version'
 hlprov() { local p; for _ in 1 2 3 4 5 6; do p=$(timeout 10 hyprctl status -j 2>/dev/null | sed -n 's/.*"configProvider"[^"]*"\([a-z]*\)".*/\1/p' | head -1); [ -n "$p" ] && { echo "$p"; return; }; sleep 3; done; }   # retried: hyprctl can time out under TCG load
 hyprcfg() { if [ "$(graphite-hypr-config check)" = lua ]; then head -1 ~/.config/hypr/hyprland.lua | grep -q '^-- Graphite Hyprland config' && [ "$(hlprov)" = lua ] || return 1; else [ ! -f ~/.config/hypr/hyprland.lua ] || return 1; fi; for _ in $(seq 10); do [ "$(timeout 10 hyprctl binds 2>/dev/null | grep -c '^bind')" -gt 0 ] && return 0; sleep 3; done; return 1; }
 echo "SMOKE: diag hyprland: $(hyprctl version 2>&1 | head -1 | cut -c1-120) provider: $(hlprov) lua-config: $([ -f ~/.config/hypr/hyprland.lua ] && head -1 ~/.config/hypr/hyprland.lua | cut -c1-40 || echo none) configerrors: $(timeout 10 hyprctl configerrors 2>&1 | head -3 | tr '\n' ' ' | cut -c1-200) binds: $(timeout 10 hyprctl binds 2>/dev/null | grep -c '^bind')"
-check "CONFIG: Graphite hyprland config loaded (Graphite hyprland.lua on 0.57+, binds present)" 'hyprcfg'
+check "CONFIG: Graphite hyprland config loaded (Graphite hyprland.lua on 0.57+, binds present)" '(for _ in 1 2 3 4 5; do hyprcfg && exit 0; sleep 10; done; exit 1)'   # hyprctl can stall under TCG load
 # first-boot setup (desk-7): opens at the first login, then never again once finished
 for _ in $(seq 60); do timeout 10 hyprctl clients -j 2>/dev/null | grep -q "\"title\": \"Graphite Setup" && break; sleep 3; done
 echo "SMOKE: SHOT firstboot"; sleep 5
@@ -57,7 +57,7 @@ check "bar (quickshell, default) loaded and mapped" 'barup 90 && pgrep -x qs && 
 check "quickshell bar config loads without QML errors" '[ -z "$(qserr)" ]'
 echo "SMOKE: diag qs errors: $(qserr)"
 barup 1 || echo "SMOKE: diag login bar: $(wbtree) gb=$(pgrep -af graphite-bar | tr '\n' ' ') log: $(grep -a 'graphite-bar\|configure' $wblog 2>/dev/null | tail -12 | tr '\n' '|') cur: $(tail -5 $qslog 2>/dev/null | tr '\n' '|') jr: $(journalctl -b -t graphite-bar --no-pager -o cat 2>/dev/null | tail -8 | tr "\n" "|") load: $(cut -d' ' -f1-3 /proc/loadavg) up: $(cut -d' ' -f1 /proc/uptime)"
-hclients() { local o; for _ in 1 2 3 4 5; do o=$(timeout 10 hyprctl clients -j 2>/dev/null); [ -n "$o" ] && { echo "$o"; return; }; sleep 2; done; }
+hclients() { local o; for _ in 1 2 3 4 5 6 7 8; do o=$(timeout 20 hyprctl clients -j 2>/dev/null); [ -n "$o" ] && { echo "$o"; return; }; sleep 2; done; }
 nkitty() { hclients | grep -c "\"class\": \"kitty\""; }
 before=$(pgrep -cx kitty)
 for _ in 1 2 3; do  # a dispatch can be lost when hyprctl gets no answer under TCG load
@@ -67,7 +67,7 @@ for _ in 1 2 3; do  # a dispatch can be lost when hyprctl gets no answer under T
 done
 for _ in $(seq 60); do [ "$(nkitty)" -gt 0 ] && break; sleep 3; done   # slow first map under load
 echo "SMOKE: diag terminal: kitty procs=$(pgrep -cx kitty) before=$before mapped=$(nkitty) classes=[$(hclients | grep -o '"class": "[^"]*"' | tr '\n' ' ' | cut -c1-200)]"
-check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ]'
+check "terminal opens via dispatch (Super+Return action)" '(for _ in 1 2 3 4 5 6; do [ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ] && exit 0; sleep 5; done; exit 1)'
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
 # desktop for the screenshots: fastfetch (logo) + a second tiled terminal
@@ -336,7 +336,7 @@ check "installer: accepts good answers, file is 0600" 'd=$(graphite-installer di
 graphite-installer open; sleep 8
 # slow TCG VMs can take 30s+ to map the window and start the IPC server
 for _ in $(seq 1 30); do timeout 10 hyprctl clients -j | grep -q "\"title\": \"Install Graphite" && timeout 10 qs ipc -c graphite-installer call installer diskCount >/dev/null 2>&1 && break; sleep 2; done
-check "installer: window opens" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Install Graphite"'
+check "installer: window opens" '(for _ in 1 2 3 4 5 6; do timeout 20 hyprctl clients -j | grep -q "\"title\": \"Install Graphite" && exit 0; sleep 5; done; exit 1)'
 # slow-VM flake (summary check saw the window still on Disk): every IPC call is retried until qs ipc
 # succeeds, and each step is confirmed through the window's own state (current/error) before moving on
 gi_ipc() { local i; for i in $(seq 1 10); do timeout 10 qs ipc -c graphite-installer call installer "$@" 2>/dev/null && return 0; sleep 2; done; return 1; }
