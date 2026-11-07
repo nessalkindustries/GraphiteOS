@@ -105,16 +105,16 @@ local function exec(cmd) return hl.dsp.exec_cmd(cmd) end
 
 -- Apps
 hl.bind("SUPER + Return",     exec(terminal))                                 -- Terminal
-hl.bind("SUPER + Space",      exec(menu))                                     -- Launcher: apps, = calculator, > commands
-hl.bind("SUPER + D",          exec(menu))                                     -- App launcher
+hl.bind("SUPER + Space",      exec(menu), { description = menu }) -- Launcher: apps, = calculator, > commands
+hl.bind("SUPER + D",          exec(menu), { description = menu }) -- App launcher
 hl.bind("SUPER + E",          exec("thunar"))                                 -- File manager
 hl.bind("SUPER + Escape",     exec("graphite-menu power"))                    -- Power menu
 hl.bind("SUPER + SHIFT + V",  exec("graphite-menu clipboard"))                -- Clipboard history
 hl.bind("SUPER + period",     exec("graphite-menu emoji"))                    -- Emoji picker
 hl.bind("SUPER + T",          exec("graphite-theme pick"))                    -- Switch theme
-hl.bind("SUPER + I",          exec("graphite-settings toggle"))               -- Settings
-hl.bind("SUPER + A",          exec("graphite-control"))                       -- Control center (volume, Wi-Fi, ...)
-hl.bind("SUPER + N",          exec("graphite-notify center"))                 -- Notification center
+hl.bind("SUPER + I",          exec("graphite-settings toggle"), { description = "graphite-settings toggle" }) -- Settings
+hl.bind("SUPER + A",          exec("graphite-control"), { description = "graphite-control" }) -- Control center (volume, Wi-Fi, ...)
+hl.bind("SUPER + N",          exec("graphite-notify center"), { description = "graphite-notify center" }) -- Notification center
 hl.bind("SUPER + SHIFT + N",  exec("graphite-notify dnd toggle"))             -- Do not disturb on/off
 hl.bind("SUPER + K",          exec("graphite-keybinds"))                      -- This cheatsheet
 hl.bind("SUPER + L",          exec("hyprlock"))                               -- Lock screen

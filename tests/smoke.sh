@@ -37,9 +37,11 @@ hyprcfg() { if [ "$(graphite-hypr-config check)" = lua ]; then head -1 ~/.config
 echo "SMOKE: diag hyprland: $(hyprctl version 2>&1 | head -1 | cut -c1-120) provider: $(hlprov) lua-config: $([ -f ~/.config/hypr/hyprland.lua ] && head -1 ~/.config/hypr/hyprland.lua | cut -c1-40 || echo none) configerrors: $(timeout 10 hyprctl configerrors 2>&1 | head -3 | tr '\n' ' ' | cut -c1-200) binds: $(timeout 10 hyprctl binds 2>/dev/null | grep -c '^bind')"
 check "CONFIG: Graphite hyprland config loaded (Graphite hyprland.lua on 0.57+, binds present)" 'hyprcfg'
 # first-boot setup (desk-7): opens at the first login, then never again once finished
-for _ in $(seq 60); do timeout 10 hyprctl clients 2>/dev/null | grep -q "title: Graphite Setup" && break; sleep 3; done
+for _ in $(seq 60); do timeout 10 hyprctl clients -j 2>/dev/null | grep -q "\"title\": \"Graphite Setup" && break; sleep 3; done
 echo "SMOKE: SHOT firstboot"; sleep 5
-check "first-boot setup opens at the first login" 'timeout 10 hyprctl clients | grep -q "title: Graphite Setup"'
+check "first-boot setup opens at the first login" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup"'
+hlog() { tail -c 200000 "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hyprland.log" 2>/dev/null | grep -aiE "$1" | tail -${2:-6} | tr '\n' '|' | cut -c1-900; }
+echo "SMOKE: diag firstboot: procs=[$(pgrep -af 'qs -c|graphite-firstboot|graphite-welcome|hypridle|polkit' | tr '\n' '|' | cut -c1-300)] titles=[$(timeout 10 hyprctl clients -j 2>/dev/null | grep -o '"title": "[^"]*"' | tr '\n' ' ' | cut -c1-300)] plain=[$(timeout 10 hyprctl clients 2>/dev/null | head -4 | tr '\n\t' '  ' | cut -c1-200)] log=[$(hlog 'exec|firstboot|error|lua' 10)]"
 check "first-boot: not marked done yet" '[ "$(graphite-firstboot status)" = done=no ]'
 timeout 10 qs ipc -c graphite-firstboot call firstboot step 2 >/dev/null 2>&1; sleep 3
 echo "SMOKE: SHOT firstboot-privacy"; sleep 3
@@ -48,15 +50,15 @@ check "first-boot: news opt-out is honored by graphite update" 'graphite-firstbo
 check "first-boot: profiles and Secure Boot hint answer" '[ "$(graphite-firstboot profiles | grep -cE "^(gaming|creator|dev|nvidia)=(installed|available)$")" = 4 ] && graphite-firstboot secureboot | grep -qi "secure boot"'
 check "first-boot: bundled wallpapers listed" '[ -n "$(graphite-firstboot wallpapers)" ]'
 graphite-firstboot finish >/dev/null 2>&1
-for _ in $(seq 10); do ! timeout 10 hyprctl clients | grep -q "title: Graphite Setup" && break; sleep 3; done
-check "first-boot: finish closes it and marks it done" '! timeout 10 hyprctl clients | grep -q "title: Graphite Setup" && [ "$(graphite-firstboot status)" = done=yes ]'
+for _ in $(seq 10); do ! timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup" && break; sleep 3; done
+check "first-boot: finish closes it and marks it done" '! timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup" && [ "$(graphite-firstboot status)" = done=yes ]'
 check "first-boot: auto does not reopen once done" 'graphite-firstboot auto; sleep 5; ! pgrep -f "qs -c graphite-firstboot"'
 check "bar (quickshell, default) loaded and mapped" 'barup 90 && pgrep -x qs && ! pgrep -x waybar'
 check "quickshell bar config loads without QML errors" '[ -z "$(qserr)" ]'
 echo "SMOKE: diag qs errors: $(qserr)"
 barup 1 || echo "SMOKE: diag login bar: $(wbtree) gb=$(pgrep -af graphite-bar | tr '\n' ' ') log: $(grep -a 'graphite-bar\|configure' $wblog 2>/dev/null | tail -12 | tr '\n' '|') cur: $(tail -5 $qslog 2>/dev/null | tr '\n' '|') jr: $(journalctl -b -t graphite-bar --no-pager -o cat 2>/dev/null | tail -8 | tr "\n" "|") load: $(cut -d' ' -f1-3 /proc/loadavg) up: $(cut -d' ' -f1 /proc/uptime)"
-hclients() { local o; for _ in 1 2 3 4 5; do o=$(timeout 10 hyprctl clients 2>/dev/null); [ -n "$o" ] && { echo "$o"; return; }; sleep 2; done; }
-nkitty() { hclients | grep -c "class: kitty"; }
+hclients() { local o; for _ in 1 2 3 4 5; do o=$(timeout 10 hyprctl clients -j 2>/dev/null); [ -n "$o" ] && { echo "$o"; return; }; sleep 2; done; }
+nkitty() { hclients | grep -c "\"class\": \"kitty\""; }
 before=$(pgrep -cx kitty)
 for _ in 1 2 3; do  # a dispatch can be lost when hyprctl gets no answer under TCG load
   timeout 15 graphite-hypr-dispatch exec kitty >/dev/null 2>&1
@@ -64,6 +66,7 @@ for _ in 1 2 3; do  # a dispatch can be lost when hyprctl gets no answer under T
   [ "$(pgrep -cx kitty)" -gt "$before" ] && break   # started but not mapped yet: wait below instead of spawning more
 done
 for _ in $(seq 60); do [ "$(nkitty)" -gt 0 ] && break; sleep 3; done   # slow first map under load
+echo "SMOKE: diag terminal: kitty procs=$(pgrep -cx kitty) before=$before mapped=$(nkitty) classes=[$(hclients | grep -o '"class": "[^"]*"' | tr '\n' ' ' | cut -c1-200)]"
 check "terminal opens via dispatch (Super+Return action)" '[ "$(pgrep -cx kitty)" -gt "$before" ] && [ "$(nkitty)" -gt 0 ]'
 pkill -x kitty 2>/dev/null; sleep 3
 echo "SMOKE: diag layers: $(hyprctl layers 2>/dev/null | grep -o 'namespace: [a-z-]*' | tr '\n' ' ' | cut -c1-300)"
@@ -123,7 +126,7 @@ lq() { timeout 25 graphite-launcher query "$1" 2>/dev/null; }
 lmapped() { hlayers | grep -q 'namespace: graphite-launcher,'; }
 lgone() { local o; o=$(hlayers); grep -q 'namespace: graphite-bar,' <<<"$o" && ! grep -q 'namespace: graphite-launcher,' <<<"$o"; }
 # hyprctl can answer empty for minutes right after a theme switch reload under TCG (h19): retry ~4 min
-spacebound() { for _ in $(seq 20); do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: space" | grep -q "arg: graphite-launcher" && return 0; sleep 3; done; return 1; }
+spacebound() { for _ in $(seq 20); do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: space" | grep -qE "(arg|description): graphite-launcher" && return 0; sleep 3; done; return 1; }
 echo "SMOKE: diag launcher: calc=[$(lq '2+3*4')] app=[$(lq kitty)] cmd=[$(lq '>lock')] run=[$(lq '>echo hi')] theme=[$(lq 'theme: nord')]"
 echo "SMOKE: diag qs procs: $(pgrep -a qs | tr '\n' '|' | cut -c1-300) binds-space: $(timeout 10 hyprctl binds 2>&1 | grep -i -A12 'key: space' | tr -s '\n\t' '  ' | cut -c1-400) layers: $(timeout 10 hyprctl layers 2>&1 | grep -o 'namespace: [a-z-]*' | tr '\n' ' ')"
 check "Super+Space is bound to graphite-launcher" 'spacebound'
@@ -161,7 +164,7 @@ check "notification daemon is the Quickshell bar" 'busctl --user status org.free
 for _ in $(seq 20); do nmapped graphite-notifications && break; sleep 3; done
 echo "SMOKE: SHOT notification-popup"; sleep 5
 check "notification popup shows (layer graphite-notifications)" 'nmapped graphite-notifications'
-check "Super+N is bound to the notification center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: n$" | grep -q "arg: graphite-notify center" && exit 0; sleep 2; done; exit 1)'
+check "Super+N is bound to the notification center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: n$" | grep -qE "(arg|description): graphite-notify center" && exit 0; sleep 2; done; exit 1)'
 echo "SMOKE: diag notify: dnd=[$(nq dnd)] popups=[$(nq popups)] count=[$(nq count)]"
 check "do-not-disturb on" '[ "$(nq dnd on)" = on ] && [ -e "$HOME/.local/state/graphite/dnd" ]'
 p0=$(nq popups); c0=$(nq count); nsend "smoke quiet"; sleep 6
@@ -182,7 +185,7 @@ cq() { timeout 25 qs ipc -c graphite-bar call control "$@" 2>/dev/null; }
 echo "SMOKE: diag control: lock=[$(pgrep -x hyprlock)] idle=[$(pgrep -x hypridle)] $(timeout 60 graphite-control status 2>&1 | tr '\n' ' ')"
 check "control center status reports every setting" '[ "$(timeout 60 graphite-control status 2>/dev/null | grep -cE "^(volume|muted|brightness|wifi|bluetooth|profile|theme)=")" = 7 ]'
 echo "SMOKE: diag binds-a: $(timeout 20 hyprctl binds 2>&1 | grep -i -B3 -A3 'arg: graphite-control' | tr -s '\n\t' '  ' | cut -c1-300)"
-check "Super+A is bound to the control center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: a$" | grep -q "arg: graphite-control" && exit 0; sleep 3; done; exit 1)'
+check "Super+A is bound to the control center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: a$" | grep -qE "(arg|description): graphite-control" && exit 0; sleep 3; done; exit 1)'
 # the VM has no sound card: give PipeWire a null sink so there is a default output to control
 if [ "$(cst volume)" = none ]; then
   timeout 20 pactl load-module module-null-sink sink_name=smoke_null sink_properties=device.description=smoke_null >/dev/null 2>&1
@@ -252,7 +255,7 @@ BARNS=graphite-bar; barup 90
 check "back to default: quickshell bar mapped, waybar gone" 'barup 5 && [ "$(pgrep -cx qs)" = 1 ] && ! pgrep -x waybar && [ "$(cat ~/.config/graphite/bar)" = quickshell ]'
 # settings app (desk-6): graphite-settings backend + Quickshell window (Super+I)
 check "settings: settings.conf is generated and sourced" '[ -f ~/.config/graphite/settings.conf ] && grep -q "^source = ~/.config/graphite/settings.conf" ~/.config/hypr/hyprland.conf && { [ "$(graphite-hypr-config check)" != lua ] || { [ -f ~/.config/graphite/settings.lua ] && grep -q "graphite/settings\"" ~/.config/hypr/hyprland.lua; }; }'
-check "Super+I is bound to Settings" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: i$" | grep -q "arg: graphite-settings" && exit 0; sleep 3; done; exit 1)'
+check "Super+I is bound to Settings" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: i$" | grep -qE "(arg|description): graphite-settings" && exit 0; sleep 3; done; exit 1)'
 check "settings: get reports every key" '[ "$(timeout 30 graphite-settings get | grep -cE "^(scale|kb_layout|kb_variant|sensitivity|natural_scroll|follow_mouse|theme|bar|wifi)=")" -ge 9 ]'
 # Hyprland 0.56 prints bools as "bool: true|false" (older: "int: 1|0"); hyprctl can lag under TCG, so poll
 hopt() { for _ in $(seq 10); do timeout 20 hyprctl getoption "$1" 2>/dev/null | grep -qE "$2" && return 0; sleep 3; done; return 1; }
@@ -262,9 +265,9 @@ echo "SMOKE: diag settings: $(timeout 20 hyprctl getoption input:touchpad:natura
 check "settings: rejects a bad value" '! timeout 30 graphite-settings set scale banana 2>/dev/null'
 check "settings: about reports the system" 'timeout 30 graphite-settings about | grep -q "^kernel="'
 timeout 10 graphite-hypr-dispatch exec "graphite-settings open" >/dev/null 2>&1
-for _ in $(seq 40); do timeout 10 hyprctl clients 2>/dev/null | grep -q "title: Graphite Settings" && break; sleep 3; done
+for _ in $(seq 40); do timeout 10 hyprctl clients -j 2>/dev/null | grep -q "\"title\": \"Graphite Settings" && break; sleep 3; done
 echo "SMOKE: SHOT settings"; sleep 5
-check "settings window opens" 'timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
+check "settings window opens" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Settings"'
 timeout 10 qs ipc -c graphite-settings call settings page about >/dev/null 2>&1; sleep 3
 echo "SMOKE: SHOT settings-about"; sleep 3
 timeout 10 qs ipc -c graphite-settings call settings page store >/dev/null 2>&1; sleep 5
@@ -274,8 +277,8 @@ timeout 10 qs ipc -c graphite-settings call settings search vlc >/dev/null 2>&1
 check "settings: apps page searches the repos" '(for _ in $(seq 20); do [ "$(timeout 10 qs ipc -c graphite-settings call settings results 2>/dev/null)" -gt 0 ] 2>/dev/null && exit 0; sleep 3; done; exit 1)'
 echo "SMOKE: SHOT settings-apps"; sleep 3
 timeout 20 graphite-settings close >/dev/null 2>&1
-for _ in $(seq 10); do ! timeout 10 hyprctl clients | grep -q "title: Graphite Settings" && break; sleep 3; done
-check "settings window closes" '! timeout 10 hyprctl clients | grep -q "title: Graphite Settings"'
+for _ in $(seq 10); do ! timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Settings" && break; sleep 3; done
+check "settings window closes" '! timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Settings"'
 # GPU auto-setup (game-1): the VM's virtual GPU needs nothing; fixtures check the per-vendor plans
 check "gpu: status lists the VM's display controller" 'timeout 60 graphite gpu status | grep -q "^gpu 1:"'
 check "gpu: nothing to install for the virtual GPU" '[ "$(timeout 60 graphite gpu plan)" = "nothing to install" ]'
@@ -332,8 +335,8 @@ check "installer: rejects bad answers" 'printf "disk=/dev/nope\nuser=Root\npassw
 check "installer: accepts good answers, file is 0600" 'd=$(graphite-installer disks | head -1 | cut -f1); printf "disk=$d\nuser=tester\npassword=x\nluks=12345678\ntimezone=UTC\nprofile=full\n" | graphite-installer answers | grep -qx ok && [ "$(stat -c %a /tmp/gi-smoke/answers)" = 600 ] && [ "$(graphite-installer status | head -1)" = state=idle ]'
 graphite-installer open; sleep 8
 # slow TCG VMs can take 30s+ to map the window and start the IPC server
-for _ in $(seq 1 30); do timeout 10 hyprctl clients | grep -q "title: Install Graphite" && timeout 10 qs ipc -c graphite-installer call installer diskCount >/dev/null 2>&1 && break; sleep 2; done
-check "installer: window opens" 'timeout 10 hyprctl clients | grep -q "title: Install Graphite"'
+for _ in $(seq 1 30); do timeout 10 hyprctl clients -j | grep -q "\"title\": \"Install Graphite" && timeout 10 qs ipc -c graphite-installer call installer diskCount >/dev/null 2>&1 && break; sleep 2; done
+check "installer: window opens" 'timeout 10 hyprctl clients -j | grep -q "\"title\": \"Install Graphite"'
 # slow-VM flake (summary check saw the window still on Disk): every IPC call is retried until qs ipc
 # succeeds, and each step is confirmed through the window's own state (current/error) before moving on
 gi_ipc() { local i; for i in $(seq 1 10); do timeout 10 qs ipc -c graphite-installer call installer "$@" 2>/dev/null && return 0; sleep 2; done; return 1; }
