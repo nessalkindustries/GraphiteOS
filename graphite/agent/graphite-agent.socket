@@ -1,0 +1,15 @@
+# Graphite Agent session daemon socket: 0600 in $XDG_RUNTIME_DIR/graphite-agent (a 0700 dir),
+# so only this user can talk to it; the daemon also checks the peer UID. Enabled for every user
+# by the package (sockets.target.wants): it costs nothing until something connects, then
+# graphite-agent.service starts and exits again after 10 idle minutes.
+[Unit]
+Description=Graphite Agent session daemon socket
+
+[Socket]
+ListenStream=%t/graphite-agent/agent.sock
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

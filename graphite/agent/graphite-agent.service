@@ -1,0 +1,13 @@
+# Graphite Agent session daemon: runs answers as persisted tasks (one at a time), keeps notes and
+# the audit log in ~/.local/share/graphite-agent/agent.db. Started by graphite-agent.socket on the
+# first request; exits after 10 idle minutes. Runs as the logged-in user, never root. The model
+# itself is graphite-llm.service (127.0.0.1:8081).
+[Unit]
+Description=Graphite Agent session daemon
+Requires=graphite-agent.socket
+After=graphite-agent.socket
+
+[Service]
+ExecStart=/usr/bin/graphite-agent daemon
+Nice=5
+NoNewPrivileges=yes

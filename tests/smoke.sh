@@ -198,6 +198,9 @@ check "graphite-agent status: packaged model found (one copy, no repo/cache dupl
 # so "can't be enabled" is enabled-state == static, and nothing may have started it before an ask
 echo "SMOKE: diag graphite-llm: enabled=$(systemctl --user is-enabled graphite-llm 2>&1) active=$(systemctl --user is-active graphite-llm 2>&1) llama=$(pgrep -c llama-server)"
 check "graphite-llm is not enabled or running at login (model loads on demand)" '[ "$(systemctl --user is-enabled graphite-llm 2>/dev/null)" = static ] && ! systemctl --user is-active -q graphite-llm && ! pgrep -x llama-server >/dev/null'
+# agent stage 2: socket-activated session daemon (0600 socket), notes round trip without the model
+check "graphite-agent.socket listening, 0600, daemon socket-activated on first request" '(systemctl --user is-active -q graphite-agent.socket && [ "$(stat -c %a "$XDG_RUNTIME_DIR/graphite-agent/agent.sock")" = 600 ] && timeout 30 graphite-agent status --json | grep -q "\"daemon\": \"running\"")'
+check "graphite-agent notes: remember, list, forget" '(timeout 20 graphite-agent remember "smoke note 42" && timeout 20 graphite-agent notes | grep -q "smoke note 42" && timeout 20 graphite-agent forget --all && ! timeout 20 graphite-agent notes | grep -q "smoke note 42")'
 # the VM has no sound card: give PipeWire a null sink so there is a default output to control
 if [ "$(cst volume)" = none ]; then
   timeout 20 pactl load-module module-null-sink sink_name=smoke_null sink_properties=device.description=smoke_null >/dev/null 2>&1
