@@ -1,0 +1,26 @@
+# shellcheck shell=bash disable=SC2034,SC2154
+# Graphite Agent model (installed by default): Qwen3.5-2B Q4_K_M GGUF for llama.cpp, so the agent
+# works offline out of the box. Pinned to exact upstream commits + sha256; graphite-agent and
+# graphite-llm.service look in /usr/share/graphite-agent/models first.
+# ~1.4 GB of already-quantised weights (zstd gains ~nothing): fastest zstd level, see COMPRESSZST.
+# tools/build-repo.sh keeps makepkg's download cache (SRCDEST) between builds.
+pkgname=graphite-agent-model
+pkgver=2026.05.19     # date of the pinned bartowski commit below
+pkgrel=1
+pkgdesc="Graphite Agent offline model: Qwen3.5-2B Q4_K_M (GGUF, ~1.4 GB)"
+arch=(any)
+url="https://huggingface.co/Qwen/Qwen3.5-2B"
+license=(Apache-2.0)
+options=(!strip !debug)
+_gguf=Qwen_Qwen3.5-2B-Q4_K_M.gguf
+source=("$_gguf::https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/7d26695454df6de5fbcce2e58681e62dae06ce43/$_gguf"
+        "LICENSE-Qwen3.5-2B::https://huggingface.co/Qwen/Qwen3.5-2B/resolve/15852e8c16360a2fea060d615a32b45270f8a8fc/LICENSE")
+sha256sums=('57a1085840f497d764a7fc5d346922dbde961efb54cc792ea81d694fd846a1d8'
+            'bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a')
+noextract=("$_gguf")
+COMPRESSZST=(zstd -c -T0 -1 -)
+
+package() {
+  install -Dm644 "$srcdir/$_gguf" "$pkgdir/usr/share/graphite-agent/models/$_gguf"
+  install -Dm644 "$srcdir/LICENSE-Qwen3.5-2B" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

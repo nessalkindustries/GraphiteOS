@@ -1,0 +1,21 @@
+# Graphite Agent local model: llama.cpp llama-server on 127.0.0.1:8081 only (never the network).
+# Not enabled at login (no [Install] section): `graphite-agent` / the panel start it on demand,
+# `graphite-agent unload` stops it and frees its RAM; it also drops the weights by itself after
+# 15 minutes idle. `graphite-agent serve` picks the model (graphite-agent-model's
+# /usr/share/graphite-agent/models first, then ~/.local/share/graphite-agent/models) and holds the
+# llama-server flags (127.0.0.1, -c 4096, --jinja --reasoning-budget 0, --no-repack).
+# Extra flags, e.g. GRAPHITE_LLM_ARGS="-t 4", go in ~/.config/graphite/agent.env.
+[Unit]
+Description=Graphite Agent local model (llama.cpp, 127.0.0.1:8081)
+ConditionPathExists=|/usr/share/graphite-agent/models/Qwen_Qwen3.5-2B-Q4_K_M.gguf
+ConditionPathExists=|%h/.local/share/graphite-agent/models/Qwen_Qwen3.5-2B-Q4_K_M.gguf
+
+[Service]
+Environment=GRAPHITE_LLM_ARGS=
+EnvironmentFile=-%h/.config/graphite/agent.env
+ExecStart=/usr/bin/graphite-agent serve $GRAPHITE_LLM_ARGS
+# keep the desktop responsive on small CPUs while it answers
+Nice=10
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5
