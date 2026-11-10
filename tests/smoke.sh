@@ -201,6 +201,8 @@ check "graphite-llm is not enabled or running at login (model loads on demand)" 
 # agent stage 2: socket-activated session daemon (0600 socket), notes round trip without the model
 check "graphite-agent.socket listening, 0600, daemon socket-activated on first request" '(systemctl --user is-active -q graphite-agent.socket && [ "$(stat -c %a "$XDG_RUNTIME_DIR/graphite-agent/agent.sock")" = 600 ] && timeout 30 graphite-agent status --json | grep -q "\"daemon\": \"running\"")'
 check "graphite-agent notes: remember, list, forget" '(timeout 20 graphite-agent remember "smoke note 42" && timeout 20 graphite-agent notes | grep -q "smoke note 42" && timeout 20 graphite-agent forget --all && ! timeout 20 graphite-agent notes | grep -q "smoke note 42")'
+# agent stage 3: the privileged helper is installed behind its polkit action and refuses non-root callers
+check "graphite-agent helper + polkit action installed (auth_admin), helper refuses non-root" '(pkaction --action-id org.graphiteos.agent.packages --verbose | grep -q "implicit active:.*auth_admin$" && /usr/lib/graphite-agent/graphite-agent-helper install 1 cowsay | grep -q "must run as root" && timeout 20 graphite-agent actions >/dev/null)'
 # the VM has no sound card: give PipeWire a null sink so there is a default output to control
 if [ "$(cst volume)" = none ]; then
   timeout 20 pactl load-module module-null-sink sink_name=smoke_null sink_properties=device.description=smoke_null >/dev/null 2>&1

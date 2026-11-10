@@ -1,17 +1,18 @@
 # shellcheck shell=bash disable=SC2034,SC2154
 # Graphite Agent (installed by default: build.sh + install/packages.sh): local assistant panel
 # (Super+Shift+A). Stage 2: session daemon (graphite-agent.socket, enabled for all users), task
-# history + audit log, notes (SQLite FTS5), more read-only tools.
+# history + audit log, notes (SQLite FTS5), more read-only tools. Stage 3: proposed changes
+# (settings, theme, apps) approved in the panel, snapshot first, undo; pkexec helper for software.
 # The model is the separate graphite-agent-model package (~1.4 GB, installed by default);
 # `graphite-agent setup-model` is the repair/fallback. graphite-llm.service: user unit, never enabled.
 pkgname=graphite-agent
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Graphite Agent: offline assistant (llama.cpp, local Qwen model, notes, audit log)"
 arch=(any)
 url="https://github.com/nessalkindustries/GraphiteOS"
 license=(MIT)
-depends=(python llama-cpp quickshell graphite-config libarchive iproute2)
+depends=(python llama-cpp quickshell graphite-config libarchive iproute2 polkit snapper)
 # the model: graphite-agent-model (installed by default; setup-model is the fallback)
 optdepends=("graphite-agent-model: the offline model (installed by default)"
             "kitty: setup-model window from the panel")
@@ -26,6 +27,9 @@ package() {
   install -d "$pkgdir/usr/lib/systemd/user/sockets.target.wants"
   ln -s ../graphite-agent.socket "$pkgdir/usr/lib/systemd/user/sockets.target.wants/graphite-agent.socket"
   install -Dm644 "$src/agent/help.md" "$pkgdir/usr/share/graphite-agent/help.md"
+  # the only privileged part: fixed package operations through pkexec (password every time)
+  install -Dm755 "$src/agent/graphite-agent-helper" "$pkgdir/usr/lib/graphite-agent/graphite-agent-helper"
+  install -Dm644 "$src/agent/org.graphiteos.agent.policy" "$pkgdir/usr/share/polkit-1/actions/org.graphiteos.agent.policy"
   install -Dm644 "$src/agent/quickshell/shell.qml" "$pkgdir/usr/share/graphite-agent/quickshell/shell.qml"
   # keybind list for the graphite_help tool, from the shipped Hyprland config (no drift)
   WAYLAND_DISPLAY='' PATH="$src/bin:$PATH" bash "$src/bin/graphite-keybinds" \

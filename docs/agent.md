@@ -17,7 +17,7 @@ home in GiB, uptime, load), `graphite_help` (bundled help: keybinds, apps, setti
 `battery_status`, `recent_updates` (pacman.log), `failed_services` (system + user),
 `read_config` (files under `~/.config/{hypr,graphite,kitty,quickshell,mako,waybar,gtk-3.0,gtk-4.0}`
 and a few `/etc` files; symlinks resolved first, secret-looking lines redacted) and
-`search_notes`. Unknown tools or arguments are refused. No shell, no writes, no cloud.
+`search_notes`. Unknown tools or arguments are refused. No shell, no file edits by the model, no cloud.
 
 ## Session daemon (Stage 2)
 `graphite-agent.socket` (enabled for every user by the package) listens on
@@ -36,6 +36,36 @@ request, so llama-server stops generating.
 
 `~/.local/share/graphite-agent/agent.db` (SQLite WAL, 0600, `secure_delete`): tasks, an audit
 log of every tool call and state change, and notes.
+
+## Changes: propose, approve, undo (Stage 3)
+Three more tools only **propose** a change: `change_setting` (theme, bar, scale, kb_layout,
+kb_variant, sensitivity, natural_scroll, follow_mouse; same value rules as `graphite-settings`,
+themes must be installed), `install_app` (official core/extra/multilib packages) and `remove_app`
+(installed packages nothing depends on). Kernels, firmware, base, systemd, pacman, sudo, boot,
+snapshot, desktop and graphite-* packages are refused (protected list). The proposal is
+validated in `graphite-agent`, stored as `awaiting_approval` (expires after 10 minutes, one per
+question) and shown as a card: what changes, what the snapshot covers, what Undo does. The model
+is told nothing has changed.
+
+Only **Approve** runs it: the panel runs `graphite-agent approve ID` in the desktop session. The
+action is claimed atomically (no double run), validated again, then:
+- **your settings**: the files it touches (`~/.config/graphite/settings.conf` + `settings.lua`,
+  `theme` or `bar`) are copied to `~/.local/share/graphite-agent/undo/ID/` (content, mode,
+  sha256), then `graphite-settings set` / `graphite-theme set`, then the value is read back.
+- **software**: `pkexec /usr/lib/graphite-agent/graphite-agent-helper` (polkit
+  `org.graphiteos.agent.packages`, `auth_admin`: your password every time). The helper is the
+  only privileged part; it checks names and the protected list again, official repos only, 2 GiB
+  free, no pacman lock, takes a snapper snapshot of / and verifies it is listed. If the snapshot
+  fails nothing is changed. It records exactly which packages the transaction added or removed.
+
+**Undo** (History tab, `graphite-agent undo ID`): settings go back to the old value and the
+journaled bytes are restored; refused if the files changed since (your edits are never
+overwritten). Software undo removes exactly the packages the install added (`pacman -Rn`), or
+reinstalls exactly what a removal took (`--asdeps` restored), with another snapshot first.
+Root snapshots don't cover /home or /boot; for a full system rollback use `graphite rollback N`
+(the card and the result name the snapshot number). An approve/undo interrupted by a crash is
+marked `interrupted`/`undo_failed` and never re-run. Not yet: Flatpak apps, editing arbitrary
+files, multi-step changes.
 
 ## Notes and history
 Notes are saved only when you ask: type "remember ..." (handled by the CLI, never by the model),
@@ -78,7 +108,8 @@ place: no cache copy), so the target stores the model once. `install.sh`'s
 ## Tests
 `tests/agent-check.sh`: offline checks against a scripted mock llama-server (tool allowlist,
 argument validation, a forced `delete_files` call, the 3-round cap, serve flags, model pins,
-cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget). `tests/smoke.sh` (VM) checks the package, the bind and
+cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget; Stage 3: proposals change nothing, approve/undo/deny/expiry, undo conflict refusal, invalid values and protected packages refused, one proposal per question, failed snapshot blocks the change, crash -> interrupted, helper as root with a stand-in snapper: real pacman install/undo, injection refused). `tests/smoke.sh` (VM) checks the package, the bind and
 that graphite-llm is not running at login.
 ![Graphite Agent panel](screenshots/agent-panel.png)
 ![Notes tab](screenshots/agent-notes.png)
+![A proposed change](screenshots/agent-change.png)

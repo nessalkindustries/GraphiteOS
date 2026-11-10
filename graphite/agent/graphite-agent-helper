@@ -1,0 +1,144 @@
+#!/usr/bin/python3 -I
+"""graphite-agent-helper: the only privileged part of Graphite Agent.
+
+Run by `graphite-agent approve|undo` through pkexec (polkit action org.graphiteos.agent.packages,
+your password every time). It trusts nothing from the caller: fixed operations only, package
+names checked again here (own copy of the protected list), official repos only, no free-form
+pacman arguments. Every operation takes a Btrfs snapshot of / first (snapper, config "root") and
+verifies it exists; if that fails nothing is changed. Prints one JSON line.
+
+  graphite-agent-helper install ID PKG              snapshot, pacman -S PKG; prints what it added
+  graphite-agent-helper remove ID PKG               snapshot, pacman -Rns PKG (leaf apps only)
+  graphite-agent-helper uninstall ID PKG...         undo of install: pacman -Rn exactly these
+  graphite-agent-helper reinstall ID --deps A,B|- PKG...   undo of remove: pacman -S, then -D --asdeps
+"""
+import json, os, re, shutil, subprocess, sys
+
+PROTECTED = re.compile(r"^(base|base-devel|linux.*|.*-firmware|.*-ucode|systemd.*|glibc|pacman.*|"
+                       r"sudo|grub.*|efibootmgr|mkinitcpio.*|btrfs-progs|snapper|snap-pac|"
+                       r"networkmanager|hyprland.*|quickshell|python|llama-cpp|ggml.*|mesa|"
+                       r"pipewire.*|wireplumber|polkit.*|dbus.*|filesystem|bash|coreutils|"
+                       r"archlinux-keyring|graphite.*|xdg-desktop-portal.*|sddm|greetd.*|plymouth|"
+                       r"cryptsetup|lvm2|util-linux|shadow|pam|nvidia.*)$")
+PKG_NAME = re.compile(r"[a-z0-9@_+][a-z0-9@._+-]{0,63}")
+MIN_FREE = 2 << 30                      # bytes free on / before installing anything
+os.environ.update(PATH="/usr/bin:/usr/sbin", LC_ALL="C")
+SNAPPER, PACMAN, ROOT = ["snapper"], ["pacman"], "/"
+# test hooks only for a direct root call (pkexec always sets PKEXEC_UID)
+if os.getuid() == 0 and "PKEXEC_UID" not in os.environ and os.environ.get("GRAPHITE_HELPER_TEST") == "1":
+    SNAPPER = os.environ.get("GRAPHITE_HELPER_SNAPPER", "snapper").split()
+    ROOT = os.environ.get("GRAPHITE_HELPER_ROOT", "/")
+
+def done(ok, **kw):
+    print(json.dumps({"ok": ok, **kw}))
+    sys.exit(0 if ok else 1)
+
+def run(cmd, timeout=1500):
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return r.returncode, r.stdout, r.stderr
+
+def installed():
+    rc, o, _ = run(PACMAN + ["-Qq"])
+    return set(o.split())
+
+def check(names):
+    if not names or len(names) > 200:
+        done(False, error="bad package list")
+    for n in names:
+        if not PKG_NAME.fullmatch(n):
+            done(False, error=f"not a package name: {n[:64]!r}")
+
+def snapshot(desc):
+    try:
+        rc, o, e = run(SNAPPER + ["-c", "root", "create", "--type", "single", "--cleanup-algorithm",
+                                  "number", "--print-number", "--description", desc[:200]], 300)
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        done(False, error=f"snapshot failed ({ex}); nothing was changed")
+    num = o.strip().splitlines()[-1].strip() if o.strip() else ""
+    if rc or not num.isdigit():
+        done(False, error=f"snapshot failed ({(e or o).strip()[:200] or rc}); nothing was changed")
+    rc, o, _ = run(SNAPPER + ["-c", "root", "list", "--columns", "number"], 120)
+    if rc or num not in o.split():
+        done(False, error=f"snapshot {num} could not be verified; nothing was changed")
+    return int(num)
+
+def main(a):
+    if len(a) < 3 or a[0] not in ("install", "remove", "uninstall", "reinstall") or not re.fullmatch(r"[0-9]{1,9}", a[1]):
+        done(False, error="usage: install|remove|uninstall|reinstall ID PKG...")
+    op, aid, rest = a[0], a[1], a[2:]
+    deps = []
+    if op == "reinstall":
+        if len(rest) < 3 or rest[0] != "--deps":
+            done(False, error="reinstall needs --deps")
+        deps = [] if rest[1] == "-" else rest[1].split(",")
+        rest = rest[2:]
+        check(deps or ["x"])
+    check(rest)
+    if op in ("install", "remove") and len(rest) != 1:
+        done(False, error=f"{op} takes one package")
+    if op in ("install", "remove") and PROTECTED.match(rest[0]):
+        done(False, error=f"{rest[0]} is a protected system package")
+    if os.path.exists(os.path.join(ROOT, "var/lib/pacman/db.lck")):
+        done(False, error="another package operation is running; nothing was changed")
+    have = installed()
+    if op == "install":
+        rc, o, _ = run(PACMAN + ["-Si", "--", rest[0]], 60)
+        repo = re.search(r"^Repository\s*:\s*(\S+)", o, re.M)
+        if rc or not repo or repo.group(1) not in ("core", "extra", "multilib"):
+            done(False, error=f"{rest[0]} is not in the official repos")
+        if rest[0] in have:
+            done(False, error=f"{rest[0]} is already installed")
+    if op == "remove":
+        if rest[0] not in have:
+            done(False, error=f"{rest[0]} is not installed")
+        rc, o, _ = run(PACMAN + ["-Qi", "--", rest[0]])
+        req = re.search(r"^Required By\s*:\s*(.*)$", o, re.M)
+        if not req or req.group(1).strip() != "None":
+            done(False, error=f"{rest[0]} is needed by other packages")
+    if op == "uninstall":
+        if not set(rest) <= have:
+            done(False, error="some of these are no longer installed: " + " ".join(sorted(set(rest) - have)))
+        # only what an agent install added: never protected packages, whatever the caller says
+        bad = [p for p in rest if PROTECTED.match(p)]
+        if bad:
+            done(False, error="refusing protected packages: " + " ".join(bad))
+    if op in ("install", "reinstall") and shutil.disk_usage(ROOT).free < MIN_FREE:
+        done(False, error="less than 2 GiB free on /; nothing was changed")
+    snap = snapshot(f"graphite-agent: before {op} {' '.join(rest)[:120]} (action {aid})")
+    if op == "install":
+        cmd = PACMAN + ["-S", "--needed", "--noconfirm", "--", rest[0]]
+    elif op == "remove":
+        explicit = set(run(PACMAN + ["-Qqe"])[1].split())
+        cmd = PACMAN + ["-Rns", "--noconfirm", "--", rest[0]]
+    elif op == "uninstall":
+        cmd = PACMAN + ["-Rn", "--noconfirm", "--", *rest]
+    else:
+        cmd = PACMAN + ["-S", "--needed", "--noconfirm", "--", *rest]
+    rc, o, e = run(cmd)
+    after = installed()
+    if rc:
+        done(False, snapshot=snap, error=f"pacman failed: {(e or o).strip().splitlines()[-1][:200] if (e or o).strip() else rc}"
+             f" (snapshot {snap} was taken first)")
+    if op == "reinstall" and deps:
+        run(PACMAN + ["-D", "--asdeps", "--", *[d for d in deps if d in after]])
+    res = {"snapshot": snap}
+    if op == "install":
+        res["added"] = sorted(after - have)
+        if rest[0] not in after:
+            done(False, snapshot=snap, error=f"{rest[0]} is not installed after pacman")
+    elif op == "remove":
+        res["removed"] = sorted(have - after)
+        res["explicit"] = sorted((have - after) & explicit)
+    elif op == "uninstall":
+        res["removed"] = sorted(have - after)
+    else:
+        res["added"] = sorted(after - have)
+    done(True, **res)
+
+if __name__ == "__main__":
+    if os.getuid() != 0:
+        done(False, error="must run as root (through pkexec)")
+    try:
+        main(sys.argv[1:])
+    except (OSError, subprocess.TimeoutExpired) as e:
+        done(False, error=str(e)[:300])

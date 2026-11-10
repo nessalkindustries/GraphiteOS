@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Graphite Agent: installing/removing software after you approve it in the agent panel.
+     Your password every time (auth_admin, not auth_admin_keep): no blanket approval. -->
+<policyconfig>
+  <vendor>Graphite OS</vendor>
+  <action id="org.graphiteos.agent.packages">
+    <description>Change installed software for Graphite Agent</description>
+    <message>Graphite Agent wants to install or remove software you approved (a snapshot of / is taken first)</message>
+    <icon_name>system-software-install</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/graphite-agent/graphite-agent-helper</annotate>
+  </action>
+</policyconfig>
