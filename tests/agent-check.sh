@@ -2,13 +2,14 @@
 # Offline checks for graphite-agent, no model needed: tool allowlist + argument validation
 # outside the model, 3-round tool cap, streaming client against a scripted mock llama-server,
 # service/panel/keybind wiring; Stage 2: session daemon (socket, one task at a time, cancel,
-# crash -> interrupted without replay, limits), config path checks, notes (FTS5), history. The live test with the real model is agent-live.sh.
+# crash -> interrupted without replay, limits), config path checks, notes (FTS5), history; Stage 3: proposed
+# changes, approve/undo; Stage 4: offline voice (fake recorder/whisper/RHVoice/player). The live test with the real model is agent-live.sh.
 # shellcheck disable=SC2015,SC2016  # ok/bad one-liners, like the other tests
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0; ok() { echo "ok   $1"; }; bad() { echo "FAIL $1"; fail=1; }
 A=graphite/agent/graphite-agent
-t=$(mktemp -d); trap 'kill "${mock:-}" "${dpid:-}" 2>/dev/null || true; rm -rf "$t"' EXIT
+t=$(mktemp -d); trap 'kill "${mock:-}" "${dpid:-}" "${d4:-}" 2>/dev/null || true; rm -rf "$t"' EXIT
 export GRAPHITE_AGENT_SOCK=$t/run/agent.sock GRAPHITE_AGENT_DATA=$t/data
 python3 -c "import ast,sys; ast.parse(open('$A').read())" && ok "graphite-agent parses" || bad "graphite-agent syntax"
 # stdlib only
@@ -315,4 +316,109 @@ SH
 else
   echo "skip helper root checks (not root)"
 fi
+
+# ---------------------------------------------------------------- Stage 4: offline voice
+V=$t/vbin; mkdir -p "$V" "$t/vmodels"; echo fake > "$t/vmodels/ggml-base.en-q5_1.bin"
+cat > "$V/mkwav" <<'PY'
+#!/usr/bin/env python3
+import math, struct, sys, wave
+silent = len(sys.argv) > 2 and sys.argv[2] == "silent"
+with wave.open(sys.argv[1], "wb") as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+    w.writeframes(b"".join(struct.pack("<h", 0 if silent else int(8000 * math.sin(i / 8))) for i in range(8000)))
+PY
+cat > "$V/pw-record" <<'PY'
+#!/usr/bin/env python3
+import os, signal, subprocess, sys, time
+open(os.environ["VLOG"], "a").write("rec " + " ".join(sys.argv[1:]) + "\n")
+subprocess.run([os.path.join(os.path.dirname(__file__), "mkwav"), sys.argv[-1]] + (["silent"] if os.environ.get("PW_SILENT") else []))
+signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+time.sleep(60)
+PY
+cat > "$V/whisper-cli" <<'SH'
+#!/bin/sh
+echo "stt ppid=$PPID $*" >> "$VLOG"
+printf ' [BLANK_AUDIO]\n Switch to the nord theme.\n'
+SH
+cat > "$V/RHVoice-test" <<'SH'
+#!/bin/sh
+echo "tts $*" >> "$VLOG"; printf 'said: ' >> "$VLOG"; cat >> "$VLOG"; echo >> "$VLOG"
+while [ $# -gt 1 ]; do [ "$1" = -o ] && "$(dirname "$0")/mkwav" "$2"; shift; done
+SH
+cat > "$V/pw-play" <<'SH'
+#!/bin/sh
+[ -s "$1" ] && echo "play $1 $(stat -c %a "$1")" >> "$VLOG"
+exec sleep "${PLAY_SLEEP:-0}"
+SH
+chmod +x "$V"/*
+export VLOG=$t/voice.log
+D4=(GRAPHITE_AGENT_SHARE="$PWD/graphite/agent" GRAPHITE_AGENT_LLM="http://127.0.0.1:$port" GRAPHITE_AGENT_NO_START=1 HOME="$t/home"
+    GRAPHITE_AGENT_SOCK="$t/run4/agent.sock" GRAPHITE_AGENT_SYSTEM_MODELS="$t/vmodels" PATH="$V:$PATH")
+c4() { env "${D4[@]}" python3 "$A" "$@"; }
+js() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(str(d[k]) for k in sys.argv[1:]))' "$@"; }
+sk() { python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(sys.argv[2].encode()+b"\n"); print(s.makefile().read())' "$t/run4/agent.sock" "$1"; }
+[[ $(env "${D4[@]}" GRAPHITE_AGENT_SYSTEM_MODELS="$t/none" python3 "$A" status --json | js stt) == False ]] && ok "voice: no voice model -> speech input reported off" || bad "stt without model"
+out=$(env "${D4[@]}" GRAPHITE_AGENT_SYSTEM_MODELS="$t/none" python3 "$A" listen --jsonl || true); grep -q "graphite-agent-voice-model" <<<"$out" && ok "voice: listen without the model says which package to install" || bad "listen no model: $out"
+[[ $(c4 status --json | js stt mic tts) == "True True True" ]] && ok "voice: status reports speech input, microphone and speech output" || bad "voice status"
+env "${D4[@]}" python3 "$A" daemon & d4=$!; for _ in $(seq 50); do [[ -S $t/run4/agent.sock ]] && break; sleep 0.1; done
+c4 listen --jsonl > "$t/l1" & l1=$!; sleep 1
+rec=$(find "$t/run4" -name 'rec-*.wav' | head -1)
+[[ -n $rec && $(stat -c %a "$rec") == 600 && $(stat -c %a "$t/run4") == 700 && -s $t/run4/listen.pid ]] && ok "voice: recording is a 0600 file in the 0700 runtime dir (RAM)" || bad "recording file: ${rec:-none}"
+c4 listen --stop; wait "$l1" || true
+grep -q '"type": "listening", "max": 30' "$t/l1" && grep -q '"type": "transcribing"' "$t/l1" && grep -q '"type": "heard", "text": "Switch to the nord theme."' "$t/l1" \
+  && ok "voice: listen -> stop -> transcript (non-speech markers dropped)" || bad "listen: $(cat "$t/l1")"
+[[ -z $(find "$t/run4" -name '*.wav' -o -name '*.pid') ]] && ok "voice: the recording is deleted right after transcription" || bad "audio left: $(ls "$t/run4")"
+grep -q "stt ppid=$d4 .*-m $t/vmodels/ggml-base.en-q5_1.bin .*-l en" "$VLOG" && ok "voice: transcription runs in the daemon (one job at a time with answers), packaged model" || bad "stt in daemon: $(grep stt "$VLOG")"
+grep -q 'rec --rate 16000 --channels 1 --format s16 ' "$VLOG" && ok "voice: 16 kHz mono capture" || bad "rec args"
+env "${D4[@]}" PW_SILENT=1 python3 "$A" listen --jsonl > "$t/l2" & l2=$!; sleep 0.8; c4 listen --stop; wait "$l2" || true
+grep -q "didn't hear anything" "$t/l2" && [[ -z $(find "$t/run4" -name '*.wav') ]] && ok "voice: silence -> 'didn't hear anything', nothing left" || bad "silence: $(cat "$t/l2")"
+env "${D4[@]}" python3 - "$t" <<'PY' && ok "voice: recording stops by itself at the time cap" || bad "listen cap"
+import sys, time; sys.path.insert(0, sys.argv[1]); import ga
+ev = []
+class O:
+    def emit(self, kind, **kw): ev.append((kind, kw))
+ga.MAX_LISTEN = 1; t0 = time.time(); rc = ga.listen_cmd([], O())
+sys.exit(0 if rc == 0 and time.time() - t0 < 5 and ev[-1] == ("heard", {"text": "Switch to the nord theme."}) else 1)
+PY
+(exec env "${D4[@]}" python3 "$A" listen --jsonl > /dev/null) & l3=$!; sleep 0.8; kill -9 "$l3"; wait "$l3" 2>/dev/null || true; sleep 0.5
+! pgrep -f "$V/pw-record" >/dev/null && ok "voice: a killed panel/listener stops the microphone (no orphan recorder)" || { bad "orphan recorder"; pkill -f "$V/pw-record" || true; }
+"$V/mkwav" "$t/tone.wav"
+(exec env "${D4[@]}" python3 "$A" ask --jsonl slow6 > /dev/null) & s6=$!; sleep 0.8
+out=$(c4 listen --jsonl --file "$t/tone.wav" || true); grep -q 'Another answer is still running' <<<"$out" && [[ -z $(find "$t/run4" -name 'rec-*.wav') ]] && ok "voice: no transcription while an answer runs (serialised), recording still deleted" || bad "stt busy: $out"
+c4 cancel || true; wait "$s6" 2>/dev/null || true
+out=$(c4 listen --jsonl --file "$t/tone.wav" || true); grep -q '"type": "heard"' <<<"$out" && ok "voice: listen --file transcribes a wav (the caller's file is kept)" || bad "listen --file: $out"
+[[ -s $t/tone.wav ]] || bad "listen --file removed the caller's file"
+fk=rec-$(printf '%08x' "$d4")89abcdef.wav; ln -s /etc/hostname "$t/run4/$fk"
+r=$(sk '{"op": "transcribe", "file": "../../etc/hostname"}'); r2=$(sk "{\"op\": \"transcribe\", \"file\": \"$fk\"}")
+grep -q 'bad recording' <<<"$r" && grep -q 'bad recording' <<<"$r2" && ok "voice: daemon transcribes only its own recordings (no paths, no symlinks)" || bad "transcribe path: $r $r2"
+rm -f "${t:?}/run4/$fk"
+c4 say '**Done.** Your theme is now `nord` [n3]. See [the docs](https://example.org).' || bad "say failed"
+grep -qx 'said: Done. Your theme is now nord . See the docs.' "$VLOG" && grep -q "tts -p slt -o $t/run4/say-" "$VLOG" && grep -q "^play $t/run4/say-.* 600$" "$VLOG" \
+  && ok "voice: say reads plain text (no markdown, links or citations) with RHVoice, plays from RAM" || bad "say: $(grep -E '^(said|tts|play)' "$VLOG")"
+[[ -z $(find "$t/run4" -name '*.wav' -o -name '*.pid') ]] && ok "voice: spoken audio deleted after playback" || bad "say left files: $(find "$t/run4")"
+(exec env "${D4[@]}" PLAY_SLEEP=37 python3 "$A" say "a long answer") & sp=$!; sleep 1; c4 say --stop || true; s0=$SECONDS; wait "$sp" 2>/dev/null || true
+(( SECONDS - s0 <= 2 )) && ! pgrep -u "$(id -u)" -f "^sleep 37" >/dev/null && ok "voice: say --stop stops reading at once" || bad "say stop"
+kill "$d4" 2>/dev/null; wait "$d4" 2>/dev/null || true
+if command -v bsdtar >/dev/null && command -v zstd >/dev/null; then
+  mkdir -p "$t/pk/usr/share/graphite-agent/models" "$t/pkgdir"; echo voicemodel > "$t/pk/usr/share/graphite-agent/models/ggml-base.en-q5_1.bin"
+  (cd "$t/pk" && bsdtar --zstd -cf "$t/pkgdir/graphite-agent-voice-model-2024.10.29-1-any.pkg.tar.zst" usr)
+  env "${D4[@]}" HOME="$t/vhome" GRAPHITE_AGENT_SYSTEM_MODELS="$t/none" python3 - "$t" <<'PY' && ok "voice: setup-model --voice extracts the voice model from a local package (sha256 checked)" || bad "setup voice"
+import hashlib, os, sys; sys.path.insert(0, sys.argv[1]); import ga
+ga.MODEL_PKG_DIRS = [sys.argv[1] + "/pkgdir"]; ga.VOICE_SHA256 = hashlib.sha256(b"voicemodel\n").hexdigest()
+rc = ga.setup_model(("voice",)); sys.exit(0 if rc == 0 and ga.voice_model() == ga.USER_VOICE and os.path.exists(ga.USER_VOICE) else 1)
+PY
+else
+  echo "skip setup-model --voice (no bsdtar/zstd)"
+fi
+VP=graphite/pkgs/graphite-agent-voice-model/PKGBUILD
+grep -qF "$(sed -n 's/^VOICE_SHA256 = "\([0-9a-f]*\)"$/\1/p' "$A")" "$VP" && grep -qF "5359861c739e955e79d9a303bcbc70fb988958b1" "$VP" && grep -q '5359861c739e955e79d9a303bcbc70fb988958b1' "$A" \
+  && grep -q 'usr/share/graphite-agent/models/\$_bin' "$VP" && ok "graphite-agent-voice-model pins the same file, commit and sha256, in the NoExtract models dir" || bad "voice pin drift"
+IS=graphite/bin/graphite-iso-install
+grep -q "! -name 'graphite-agent-voice-model-\*'" "$IS" && grep -q 'graphite-agent-voice-model-\*.pkg.tar.zst; do' "$IS" && grep -q 'graphite-agent-voice-model' graphite/install/packages.sh \
+  && grep -q 'graphite-agent-voice-model)' tools/build-repo.sh && grep -q 'graphite-agent-voice-model)' graphite/pkgs/graphite-meta/PKGBUILD && ok "voice model: in the default install set, installed once from the ISO" || bad "voice model wiring"
+grep -A1 '^depends=' graphite/pkgs/graphite-agent/PKGBUILD | grep -q 'pipewire-audio whisper-cpp rhvoice rhvoice-voice-slt' && ok "graphite-agent depends on whisper-cpp + rhvoice (Arch packages)" || bad "voice depends"
+for f in graphite/templates/hypr-lua/hyprland.lua graphite/config/hypr/hyprland.conf; do
+  [[ $(grep -cE '"SUPER \+ ALT \+ A"|\$mod ALT, A,' "$f") == 1 ]] && grep -q 'graphite-agent voice' "$f" && ok "Super+Alt+A -> graphite-agent voice in ${f##*/} (no other binding)" || bad "voice bind in $f"
+done
+grep -q 'function voice(): void' graphite/agent/quickshell/shell.qml && grep -q 'Mic on' graphite/agent/quickshell/shell.qml && ok "panel: listen IPC + visible mic indicator" || bad "panel voice"
 exit $fail

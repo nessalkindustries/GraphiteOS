@@ -67,7 +67,26 @@ Root snapshots don't cover /home or /boot; for a full system rollback use `graph
 marked `interrupted`/`undo_failed` and never re-run. Not yet: Flatpak apps, editing arbitrary
 files, multi-step changes.
 
-## Notes and history
+## Voice (Stage 4)
+Offline both ways, nothing leaves the computer and no audio is kept:
+- **Speech in**: Speak in the panel, or **Super+Alt+A** (opens the panel and starts listening;
+  press again, Esc or Stop to finish). `pw-record` captures 16 kHz mono from the default
+  microphone into `$XDG_RUNTIME_DIR/graphite-agent/` (RAM, 0700 dir, 0600 file), stopping by
+  itself after 30 s. The red **Mic on · N s / 30 s** pill shows whenever it records. The file
+  goes to the session daemon, which runs `whisper-cli` (Arch `whisper-cpp`) with
+  `ggml-base.en-q5_1.bin` (package `graphite-agent-voice-model`, 59.7 MB, pinned commit +
+  sha256) under the same lock as answers (never both at once), then deletes the file. A
+  recording left by a killed process is removed on the next use; the recorder dies with its
+  parent. Silence gives "I didn't hear anything"; whisper's markers ([BLANK_AUDIO]) are dropped.
+  The transcript is asked like typed text: proposals still need Approve. `graphite-agent listen`
+  (terminal), `listen --file WAV`.
+- **Speech out**: a spoken question's answer is read aloud with RHVoice (`rhvoice` +
+  `rhvoice-voice-slt`, English "slt"); Read aloud / Stop reading in the panel,
+  `graphite-agent say TEXT|-`, `say --stop`. Markdown, links and note citations are not read.
+- English only for now (base.en). `graphite-agent setup-model --voice` repairs the model (local
+  package first, else download, sha256).
+
+
 Notes are saved only when you ask: type "remember ..." (handled by the CLI, never by the model),
 use the panel's Notes tab, or `graphite-agent remember "..."`. Text that looks like a password,
 key or token is refused. Matching notes (SQLite FTS5, BM25) are added to the question, labelled
@@ -88,14 +107,23 @@ graphite-agent history [N]|on|off|clear, audit [TASK]   recent questions, tool-c
 graphite-agent setup-model         repair/fallback: verify the model, else put a copy in
                                    ~/.local/share/graphite-agent/models from a local
                                    graphite-agent-model package (live ISO: /opt/graphite-repo)
-                                   or a download, sha256-checked
+                                   or a download, sha256-checked (--llm / --voice: one model)
+graphite-agent listen [--jsonl]    record a question (until listen --stop or 30 s), print the text
+graphite-agent say TEXT|-          read text aloud; say --stop
+graphite-agent voice               Super+Alt+A: open the panel and start/stop listening
 ```
 The model service starts on demand (opening the panel warms it up) and drops the weights after
 15 idle minutes. Extra llama-server flags go in `~/.config/graphite/agent.env`, e.g.
 `GRAPHITE_LLM_ARGS="-t 4"`.
 
 ## ISO and installer
-Both packages are dependencies of `graphite-desktop` (graphite-meta pkgrel 12), so existing
+`graphite-agent-voice-model` (59.7 MB, whisper base.en q5_1) is handled exactly like the LLM
+package below: in `/usr/share/graphite-agent/models` (NoExtract on the live ISO), copied to the
+target once by `pacman -U` from the ISO. Voice adds about 66 MB to the ISO (model 59.7 MB +
+whisper-cpp 0.9 MB + rhvoice/english/slt 6.0 MB compressed; ffmpeg, ggml, speech-dispatcher,
+portaudio and pipewire-audio are already on it) and about 76 MB installed.
+
+The packages are dependencies of `graphite-desktop` (graphite-meta pkgrel 13), so existing
 installs get them on `graphite update` (`pacman -Syu`; the model is a ~1.37 GB download from the
 [graphite] repo). On the live ISO the model package is registered but its GGUF is not extracted
 (`NoExtract` in the archiso profile's `pacman.conf`): it ships once, as the package in the ISO's
@@ -108,8 +136,9 @@ place: no cache copy), so the target stores the model once. `install.sh`'s
 ## Tests
 `tests/agent-check.sh`: offline checks against a scripted mock llama-server (tool allowlist,
 argument validation, a forced `delete_files` call, the 3-round cap, serve flags, model pins,
-cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget; Stage 3: proposals change nothing, approve/undo/deny/expiry, undo conflict refusal, invalid values and protected packages refused, one proposal per question, failed snapshot blocks the change, crash -> interrupted, helper as root with a stand-in snapper: real pacman install/undo, injection refused). `tests/smoke.sh` (VM) checks the package, the bind and
+cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget; Stage 3: proposals change nothing, approve/undo/deny/expiry, undo conflict refusal, invalid values and protected packages refused, one proposal per question, failed snapshot blocks the change, crash -> interrupted, helper as root with a stand-in snapper: real pacman install/undo, injection refused; Stage 4 with a fake recorder/whisper/RHVoice/player: listen -> stop -> text, 0600 file in RAM deleted after transcription, transcription in the daemon and refused while an answer runs, silence, the 30 s cap, no orphan recorder after a kill, no paths or symlinks via the socket, say strips markdown and stops at once, voice model pin and ISO wiring, Super+Alt+A). `tests/smoke.sh` (VM) checks the package, the bind and
 that graphite-llm is not running at login.
 ![Graphite Agent panel](screenshots/agent-panel.png)
 ![Notes tab](screenshots/agent-notes.png)
 ![A proposed change](screenshots/agent-change.png)
+![Voice](screenshots/agent-voice.png)

@@ -110,6 +110,7 @@ hl.bind("SUPER + T",          exec("graphite-theme pick"))                    --
 hl.bind("SUPER + I",          exec("graphite-settings toggle"), { description = "graphite-settings toggle" }) -- Settings
 hl.bind("SUPER + A",          exec("graphite-control"), { description = "graphite-control" }) -- Control center (volume, Wi-Fi, ...)
 hl.bind("SUPER + SHIFT + A",  exec("graphite-agent toggle"), { description = "graphite-agent toggle" }) -- Graphite Agent (local assistant)
+hl.bind("SUPER + ALT + A",    exec("graphite-agent voice"), { description = "graphite-agent voice" }) -- Ask the agent by voice (press again to stop)
 hl.bind("SUPER + N",          exec("graphite-notify center"), { description = "graphite-notify center" }) -- Notification center
 hl.bind("SUPER + SHIFT + N",  exec("graphite-notify dnd toggle"))             -- Do not disturb on/off
 hl.bind("SUPER + K",          exec("graphite-keybinds"))                      -- This cheatsheet
