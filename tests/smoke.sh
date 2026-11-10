@@ -191,7 +191,9 @@ echo "SMOKE: diag control: lock=[$(pgrep -x hyprlock)] idle=[$(pgrep -x hypridle
 check "control center status reports every setting" '[ "$(timeout 60 graphite-control status 2>/dev/null | grep -cE "^(volume|muted|brightness|wifi|bluetooth|profile|theme)=")" = 7 ]'
 echo "SMOKE: diag binds-a: $(timeout 20 hyprctl binds 2>&1 | grep -i -B3 -A3 'arg: graphite-control' | tr -s '\n\t' '  ' | cut -c1-300)"
 check "Super+A is bound to the control center" '(for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -i -A12 "key: a$" | grep -qE "(arg|description): graphite-control" && exit 0; sleep 3; done; exit 1)'
-check "graphite-agent installed, Super+Shift+A bound" '(pacman -Q graphite-agent llama-cpp >/dev/null && for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -qE "(arg|description): graphite-agent toggle" && exit 0; sleep 3; done; exit 1)'
+check "graphite-agent + graphite-agent-model installed, Super+Shift+A bound" '(pacman -Q graphite-agent graphite-agent-model llama-cpp >/dev/null && for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -qE "(arg|description): graphite-agent toggle" && exit 0; sleep 3; done; exit 1)'
+check "graphite-agent status: packaged model found (one copy, no repo/cache duplicate)" '(timeout 20 graphite-agent status --json | grep -q "\"model_path\": \"/usr/share/graphite-agent/models/" && [ -s /usr/share/graphite-agent/models/Qwen_Qwen3.5-2B-Q4_K_M.gguf ] && ! ls /var/lib/graphite/repo/graphite-agent-model-* /var/cache/pacman/pkg/graphite-agent-model-* >/dev/null 2>&1)'
+
 check "graphite-llm is not enabled or running at login (model loads on demand)" '! systemctl --user is-enabled -q graphite-llm 2>/dev/null && ! systemctl --user is-active -q graphite-llm'
 # the VM has no sound card: give PipeWire a null sink so there is a default output to control
 if [ "$(cst volume)" = none ]; then

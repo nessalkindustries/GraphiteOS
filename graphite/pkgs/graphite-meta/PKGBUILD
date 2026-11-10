@@ -3,7 +3,7 @@
 pkgbase=graphite-meta
 pkgname=(graphite-desktop graphite-gaming graphite-dev graphite-nvidia graphite-creator)
 pkgver=0.3.0
-pkgrel=11
+pkgrel=12
 arch=(any)
 url="https://github.com/Skeleten80/GraphiteOS"
 license=(MIT)
@@ -14,6 +14,8 @@ package_graphite-desktop() {
   pkgdesc="Graphite Hyprland desktop + graphics stack"
   mapfile -t depends < <(_list desktop; _list graphics)
   depends+=(graphite-config networkmanager)
+  # offline assistant (Super+Shift+A) + its model: existing installs get both on `graphite update`
+  depends+=(graphite-agent graphite-agent-model)
 }
 package_graphite-gaming() {
   pkgdesc="Graphite gaming stack (Steam, gamemode, MangoHud, gamescope session, Lutris, Wine)"

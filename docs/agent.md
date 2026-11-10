@@ -2,8 +2,7 @@
 
 An offline, read-only assistant: **Super+Shift+A** (or `graphite-agent toggle`) opens a Quickshell
 panel; questions go to a local Qwen3.5-2B (Q4_K_M) model run by llama.cpp on `127.0.0.1:8081`.
-Nothing leaves the computer. Installed by default (ISO live system: `graphite-agent`; installed
-systems: `graphite-agent` + `graphite-agent-model`).
+Nothing leaves the computer. Installed by default: both packages are `graphite-desktop` dependencies.
 
 | Package | Contents |
 |---|---|
@@ -34,8 +33,11 @@ The model service starts on demand (opening the panel warms it up) and drops the
 `GRAPHITE_LLM_ARGS="-t 4"`.
 
 ## ISO and installer
-The model package is **not** installed into the live system: it ships once, in the ISO's
-`/opt/graphite-repo` (installing it as well would store 1.4 GB twice in the squashfs).
+Both packages are dependencies of `graphite-desktop` (graphite-meta pkgrel 12), so existing
+installs get them on `graphite update` (`pacman -Syu`; the model is a ~1.37 GB download from the
+[graphite] repo). On the live ISO the model package is registered but its GGUF is not extracted
+(`NoExtract` in the archiso profile's `pacman.conf`): it ships once, as the package in the ISO's
+`/opt/graphite-repo` (extracting it too would store 1.4 GB twice in the squashfs).
 `graphite-iso-install` copies the bundled repo to the target **without** that package and runs
 `pacman -U` on it straight from a read-only bind mount of the ISO repo (pacman reads `-U` files in
 place: no cache copy), so the target stores the model once. `install.sh`'s
