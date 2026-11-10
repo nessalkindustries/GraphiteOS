@@ -194,7 +194,10 @@ check "Super+A is bound to the control center" '(for _ in 1 2 3 4 5; do timeout 
 check "graphite-agent + graphite-agent-model installed, Super+Shift+A bound" '(pacman -Q graphite-agent graphite-agent-model llama-cpp >/dev/null && for _ in 1 2 3 4 5; do timeout 10 hyprctl binds 2>/dev/null | grep -qE "(arg|description): graphite-agent toggle" && exit 0; sleep 3; done; exit 1)'
 check "graphite-agent status: packaged model found (one copy, no repo/cache duplicate)" '(timeout 20 graphite-agent status --json | grep -q "\"model_path\": \"/usr/share/graphite-agent/models/" && [ -s /usr/share/graphite-agent/models/Qwen_Qwen3.5-2B-Q4_K_M.gguf ] && ! ls /var/lib/graphite/repo/graphite-agent-model-* /var/cache/pacman/pkg/graphite-agent-model-* >/dev/null 2>&1)'
 
-check "graphite-llm is not enabled or running at login (model loads on demand)" '! systemctl --user is-enabled -q graphite-llm 2>/dev/null && ! systemctl --user is-active -q graphite-llm'
+# graphite-llm has no [Install] section: `is-enabled` prints "static" and exits 0 for such units,
+# so "can't be enabled" is enabled-state == static, and nothing may have started it before an ask
+echo "SMOKE: diag graphite-llm: enabled=$(systemctl --user is-enabled graphite-llm 2>&1) active=$(systemctl --user is-active graphite-llm 2>&1) llama=$(pgrep -c llama-server)"
+check "graphite-llm is not enabled or running at login (model loads on demand)" '[ "$(systemctl --user is-enabled graphite-llm 2>/dev/null)" = static ] && ! systemctl --user is-active -q graphite-llm && ! pgrep -x llama-server >/dev/null'
 # the VM has no sound card: give PipeWire a null sink so there is a default output to control
 if [ "$(cst volume)" = none ]; then
   timeout 20 pactl load-module module-null-sink sink_name=smoke_null sink_properties=device.description=smoke_null >/dev/null 2>&1
@@ -257,7 +260,10 @@ for _ in 1 2 3; do
   timeout 15 graphite-hypr-dispatch exec graphite-launcher >/dev/null 2>&1
   for _ in $(seq 20); do timeout 10 hyprctl layers 2>/dev/null | grep -q 'namespace: rofi,' && break 2; pgrep -x rofi >/dev/null && sleep 3 && continue; sleep 2; done
 done
-check "launcher falls back to rofi with Waybar" '(for _ in 1 2 3; do timeout 10 hyprctl layers | grep -q "namespace: rofi," && exit 0; sleep 3; done; exit 1)'
+echo "SMOKE: diag rofi: pid=$(pgrep -x rofi | tr '\n' ' ') load=$(cut -d' ' -f1-3 /proc/loadavg) memavail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)MB llama=$(pgrep -c llama-server) top=[$(ps -eo pcpu=,comm= --sort=-pcpu | head -3 | tr -s ' \n' ' ')]"
+# hyprctl can stall >10 s under TCG right after the bar switch (run agent-s1: 3 timed-out polls);
+# poll up to ~2 min with a longer timeout, relaunching rofi only if it is gone
+check "launcher falls back to rofi with Waybar" '(for _ in $(seq 6); do timeout 20 hyprctl layers 2>/dev/null | grep -q "namespace: rofi," && exit 0; pgrep -x rofi >/dev/null || timeout 15 graphite-hypr-dispatch exec graphite-launcher >/dev/null 2>&1; sleep 5; done; exit 1)'
 pkill -x rofi 2>/dev/null; sleep 2
 timeout 900 graphite bar quickshell >/dev/null 2>&1 || echo "SMOKE: diag bar quickshell rc=$?"
 BARNS=graphite-bar; barup 90
