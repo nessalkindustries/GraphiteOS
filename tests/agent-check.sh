@@ -27,6 +27,7 @@ import sys; sys.path.insert(0, sys.argv[1]); import ga
 def check(name, cond):
     print(("ok   " if cond else "FAIL ") + name)
     if not cond: sys.exit(1)
+check("change tools are exactly change_setting, install_app, remove_app (proposals only)", sorted(ga.ACTIONS) == ["change_setting", "install_app", "remove_app"] and len(ga.SCHEMAS) == 12)
 check("allowlist is exactly the 9 read-only tools", sorted(ga.TOOLS) == sorted(["graphite_help", "os_release", "system_status", "network_status", "battery_status", "recent_updates", "failed_services", "read_config", "search_notes"]))
 for bad_name in ("delete_files", "run_shell", "rm", "", "os_release ", "__import__"):
     okk, r = ga.run_tool(bad_name, "{}"); check(f"unknown tool {bad_name!r} refused", not okk and "error" in r)
@@ -61,6 +62,10 @@ class H(BaseHTTPRequestHandler):
         log.write(json.dumps(req) + "\n"); log.flush()
         q = req["messages"][1]["content"]; tools_seen = [m for m in req["messages"] if m["role"] == "tool"]
         if q == "loop" and "tools" in req: return sse(self, call("os_release"))
+        if q.startswith("propose ") and not tools_seen:   # propose <tool> <json args>
+            _, tool, args = q.split(" ", 2); return sse(self, call(tool, args))
+        if q == "two" and not tools_seen:
+            return sse(self, [{"tool_calls": [{"index": i, "id": f"p{i}", "function": {"name": "change_setting", "arguments": json.dumps({"key": "follow_mouse", "value": v})}} for i, v in enumerate(("2", "3"))]}])
         if q == "multi" and "tools" in req:   # 3 different calls per round, every round
             n = len(tools_seen); return sse(self, [{"tool_calls": [{"index": i, "id": f"m{n}{i}", "function": {"name": "graphite_help", "arguments": json.dumps({"topic": ["keybinds", "apps", "settings", "updates", "agent", "all"][(n + i) % 6]})}} for i in range(3)]}])
         if q.startswith("slow"):
@@ -213,4 +218,101 @@ U=graphite/agent/graphite-agent.socket
 grep -q '^SocketMode=0600$' "$U" && grep -q '^DirectoryMode=0700$' "$U" && grep -q '^ListenStream=%t/graphite-agent/agent.sock$' "$U" && ok "graphite-agent.socket: 0600 socket in XDG_RUNTIME_DIR" || bad "socket unit"
 grep -q 'sockets.target.wants/graphite-agent.socket' graphite/pkgs/graphite-agent/PKGBUILD && ok "socket enabled for all users by the package" || bad "socket enable"
 grep -q '^ExecStart=/usr/bin/graphite-agent daemon$' graphite/agent/graphite-agent.service && ! grep -q '^\[Install\]' graphite/agent/graphite-agent.service && ok "graphite-agent.service is socket-activated only" || bad "daemon unit"
+
+# ---------------------------------------------------------------- Stage 3: proposed changes
+H3=$t/s3home; mkdir -p "$H3" "$t/fakebin"
+# fake privileged helper (no root, no pkexec here): records calls; FAIL_SNAPSHOT=1 simulates snapper failing
+cat > "$t/fakebin/helper" <<'SH'
+#!/bin/sh
+echo "$@" >> "$HELPER_LOG"
+if [ -n "$FAIL_SNAPSHOT" ]; then echo '{"ok": false, "error": "snapshot failed (simulated); nothing was changed"}'; exit 1; fi
+case $1 in install) echo "{\"ok\": true, \"snapshot\": 41, \"added\": [\"$3\", \"$3-data\"]}";;
+  uninstall) echo '{"ok": true, "snapshot": 42, "removed": []}';; *) echo '{"ok": true, "snapshot": 43, "removed": ["x"], "explicit": ["x"]}';; esac
+SH
+chmod +x "$t/fakebin/helper"
+D3=(GRAPHITE_AGENT_SHARE="$PWD/graphite/agent" GRAPHITE_AGENT_LLM="http://127.0.0.1:$port" GRAPHITE_AGENT_NO_START=1 HOME="$H3"
+    GRAPHITE_AGENT_SOCK="$t/run3/agent.sock" GRAPHITE_AGENT_DATA="$H3/data" PATH="$PWD/graphite/bin:$PATH" GRAPHITE_PATH="$PWD/graphite"
+    GRAPHITE_AGENT_HELPER="$t/fakebin/helper" GRAPHITE_AGENT_PKEXEC="" HELPER_LOG="$t/helper.log" HYPRLAND_INSTANCE_SIGNATURE="")
+c3() { env "${D3[@]}" python3 "$A" "$@"; }
+aid() { python3 -c 'import json,sys; [print(json.loads(l)["id"]) for l in sys.stdin if "\"action\"" in l]' | tail -1; }
+st() { c3 actions --json | python3 -c 'import json,sys; print({a["id"]: a["state"] for a in json.load(sys.stdin)}[int(sys.argv[1])])' "$1"; }
+c3 history >/dev/null; env "${D3[@]}" graphite-settings init   # the store; settings.conf as on a real install
+out=$(c3 ask --jsonl 'propose change_setting {"key": "follow_mouse", "value": "2"}' || true); a1=$(aid <<<"$out")
+[[ -n $a1 && $(st "$a1") == awaiting_approval ]] && grep -q '"summary": "Change the focus follows mouse from 1 to 2"' <<<"$out" \
+  && [[ ! -f $H3/data/undo/$a1/0-settings.conf ]] && ok "a proposal changes nothing and waits for approval" || bad "proposal: $out"
+grep -q 'nothing has changed yet' "$t/req.log" && ok "the model is told nothing changed yet" || bad "tool result to model"
+c3 approve "$a1" >/dev/null; [[ $(c3 history >/dev/null; env "${D3[@]}" graphite-settings get follow_mouse) == 2 && $(st "$a1") == "done" && -f $H3/data/undo/$a1/0-settings.conf ]] \
+  && ok "approve: journal snapshot first, then the change, verified" || bad "approve setting ($(st "$a1"))"
+! c3 approve "$a1" >/dev/null 2>&1 && ok "a done action can't be approved again" || bad "double approve"
+c3 undo "$a1" >/dev/null; [[ $(env "${D3[@]}" graphite-settings get follow_mouse) == 1 && $(st "$a1") == undone ]] && ok "undo restores the previous value" || bad "undo ($(st "$a1"))"
+out=$(c3 ask --jsonl 'propose change_setting {"key": "follow_mouse", "value": "3"}' || true); a2=$(aid <<<"$out"); c3 approve "$a2" >/dev/null
+echo "# my own edit" >> "$H3/.config/graphite/settings.conf"
+out=$(c3 undo "$a2" 2>&1 || true); grep -q 'undo refused' <<<"$out" && [[ $(st "$a2") == "done" ]] && grep -q 'my own edit' "$H3/.config/graphite/settings.conf" \
+  && ok "undo refuses when the files changed since (your edit kept)" || bad "undo conflict: $out"
+out=$(c3 ask --jsonl 'propose change_setting {"key": "theme", "value": "nord"}' || true); a3=$(aid <<<"$out")
+grep -q 'from graphite-teal to graphite-nord' <<<"$out" && c3 approve "$a3" >/dev/null && [[ $(env "${D3[@]}" graphite-theme current) == graphite-nord ]] \
+  && c3 undo "$a3" >/dev/null && [[ $(env "${D3[@]}" graphite-theme current) == graphite-teal ]] && ok "theme change: approve, then undo back to the old theme" || bad "theme: $out"
+out=$(c3 ask --jsonl 'propose change_setting {"key": "theme", "value": "nord"}' || true); a4=$(aid <<<"$out"); c3 deny "$a4" >/dev/null
+[[ $(st "$a4") == denied && $(env "${D3[@]}" graphite-theme current) == graphite-teal ]] && ! c3 approve "$a4" >/dev/null 2>&1 && ok "deny: nothing changes, can't be approved later" || bad "deny"
+out=$(c3 ask --jsonl 'propose change_setting {"key": "theme", "value": "nord"}' || true); a5=$(aid <<<"$out")
+env "${D3[@]}" python3 - "$t" "$a5" <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import ga
+ga.Store().db.execute("UPDATE actions SET expires=0 WHERE id=?", (int(sys.argv[2]),))
+PY
+! c3 approve "$a5" >/dev/null 2>&1 && [[ $(st "$a5") == expired ]] && ok "proposals expire (10 min)" || bad "expiry"
+for bad_args in '{"key": "scale", "value": "7"}' '{"key": "shell", "value": "rm -rf ~"}' '{"key": "kb_layout", "value": "us; rm -rf ~"}' '{"key": "theme", "value": "../../etc"}' '{"key": "follow_mouse", "value": "3"}'; do
+  out=$(c3 ask --jsonl "propose change_setting $bad_args" || true)
+  grep -q '"name": "change_setting", "ok": false' <<<"$out" && ! grep -q '"type": "action"' <<<"$out" && ok "invalid change refused before proposal: $bad_args" || bad "not refused: $bad_args"
+done
+for pkg in linux glibc graphite-config "vlc; rm -rf /" "-Rns" sudo; do
+  out=$(c3 ask --jsonl "propose install_app {\"package\": \"$pkg\"}" || true)
+  ! grep -q '"type": "action"' <<<"$out" && ok "install of '$pkg' refused" || bad "install $pkg proposed"
+done
+out=$(c3 ask --jsonl two || true); [[ $(grep -c '"type": "action"' <<<"$out") == 1 ]] && grep -q 'only one change' "$t/req.log" && ok "one proposal per question" || bad "two proposals"
+# software (fake helper, fake package plan)
+env "${D3[@]}" python3 - "$t" <<'PY' && ok "install/remove: snapshot+change through the helper, undo calls it with exactly the recorded packages" || bad "package flow"
+import io, json, os, sys; sys.path.insert(0, sys.argv[1]); import ga
+s = ga.Store()
+plan = {"kind": "system", "args": {"package": "cowsay"}, "pre": {"packages": ["cowsay"]}, "summary": "Install cowsay", "details": []}
+aid = s.add_action(0, "install_app", plan)
+ga.plan_install_app = lambda package: plan; ga.ACTIONS["install_app"] = (ga.plan_install_app, ga.ACTIONS["install_app"][1])
+assert ga.action_cmd("approve", [str(aid)]) == 0 and s.action(aid)["record"]["added"] == ["cowsay", "cowsay-data"], s.action(aid)
+assert ga.action_cmd("undo", [str(aid)]) == 0 and s.action(aid)["state"] == "undone"
+log = open(os.environ["HELPER_LOG"]).read().splitlines()
+assert log[-2] == f"install {aid} cowsay" and log[-1] == f"uninstall {aid} cowsay cowsay-data", log
+os.environ["FAIL_SNAPSHOT"] = "1"
+aid = s.add_action(0, "install_app", plan)
+assert ga.action_cmd("approve", [str(aid)]) == 1 and s.action(aid)["state"] == "failed" and "snapshot failed" in s.action(aid)["error"]
+PY
+grep -q 'snapshot failed' <(c3 actions) && ok "a failed snapshot blocks the change (action failed, nothing run)" || bad "snapshot failure"
+env "${D3[@]}" python3 - "$t" <<'PY' && ok "crash mid-approve: marked interrupted on restart, never re-run" || bad "action crash recovery"
+import sys; sys.path.insert(0, sys.argv[1]); import ga
+s = ga.Store(); aid = s.add_action(0, "install_app", {"kind": "system", "args": {"package": "x"}, "pre": {}, "summary": "x", "details": []})
+assert s.act_transition(aid, ("awaiting_approval",), "running", pid=999999)
+s.recover(); a = s.action(aid); sys.exit(0 if a["state"] == "interrupted" and "Not retried" in a["error"] else 1)
+PY
+[[ "$(grep -A7 '^PROTECTED = ' "$A" | sed -n '1,/)\$/p' | tr -d ' ')" == "$(grep -A7 '^PROTECTED = ' graphite/agent/graphite-agent-helper | sed -n '1,/)\$/p' | tr -d ' ')" ]] \
+  && ok "helper keeps its own, identical protected-package list" || bad "protected list drift"
+P=graphite/agent/org.graphiteos.agent.policy
+grep -q '<allow_active>auth_admin</allow_active>' "$P" && grep -q 'exec.path">/usr/lib/graphite-agent/graphite-agent-helper<' "$P" \
+  && grep -q 'usr/lib/graphite-agent/graphite-agent-helper' graphite/pkgs/graphite-agent/PKGBUILD && ok "polkit: password every time (auth_admin), exec.path = packaged helper" || bad "polkit policy"
+head -1 graphite/agent/graphite-agent-helper | grep -qx '#!/usr/bin/python3 -I' && ok "helper runs isolated (python3 -I)" || bad "helper shebang"
+if [[ $EUID == 0 ]]; then out=$(runuser -u nobody -- python3 "$PWD/graphite/agent/graphite-agent-helper" install 1 vlc || true); else out=$(python3 graphite/agent/graphite-agent-helper install 1 vlc || true); fi; grep -q 'must run as root' <<<"$out" && ok "helper refuses to run without root" || bad "helper non-root"
+if [[ $EUID == 0 ]] && command -v pacman >/dev/null; then   # root (box container): the real helper with a fake snapper
+  cat > "$t/fakebin/snapper" <<'SH'
+#!/bin/sh
+[ -n "$SNAP_FAIL" ] && { echo "snapper: no config root" >&2; exit 1; }
+case "$*" in *create*) echo 7 ;; *list*) printf '0\n7\n' ;; esac
+SH
+  chmod +x "$t/fakebin/snapper"
+  HX=(GRAPHITE_HELPER_TEST=1 GRAPHITE_HELPER_SNAPPER="$t/fakebin/snapper")
+  hp() { env "${HX[@]}" python3 graphite/agent/graphite-agent-helper "$@"; }
+  out=$(hp install 9 linux || true); grep -q 'protected' <<<"$out" && ok "helper: protected package refused" || bad "helper protected: $out"
+  out=$(hp install 9 '--root=/tmp' || true); grep -q 'not a package name' <<<"$out" && ok "helper: option injection refused" || bad "helper injection: $out"
+  out=$(SNAP_FAIL=1 hp install 9 sl || true); grep -q 'snapshot failed' <<<"$out" && ! pacman -Q sl >/dev/null 2>&1 && ok "helper: snapshot failure -> nothing installed" || bad "helper snap fail: $out"
+  out=$(hp install 9 sl || true); grep -q '"ok": true, "snapshot": 7, "added": \["sl"\]' <<<"$out" && pacman -Q sl >/dev/null && ok "helper: real install after a verified snapshot" || bad "helper install: $out"
+  out=$(hp uninstall 9 sl || true); grep -q '"ok": true' <<<"$out" && ! pacman -Q sl >/dev/null 2>&1 && ok "helper: undo removes exactly what was added" || bad "helper uninstall: $out"
+else
+  echo "skip helper root checks (not root)"
+fi
 exit $fail

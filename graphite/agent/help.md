@@ -31,8 +31,12 @@ are taken around package changes (snapper); see the recovery guide to roll back.
 ## agent
 This assistant runs a small local model (Qwen3.5-2B) with llama.cpp on this computer. It works
 offline and sends nothing anywhere. It can read the Graphite version, system status, network,
-battery, recent updates, failed services, config files under ~/.config and this help; it cannot
-run commands or change anything. Notes: say "remember ..." (or use the Notes tab, or
+battery, recent updates, failed services, config files under ~/.config and this help. It can
+propose a change: theme, bar, display scale, keyboard layout, pointer settings, or installing or
+removing an app from the Arch repos. Nothing changes until you click Approve on the card; your
+settings are copied to an undo journal first, software changes ask for your password and take a
+Btrfs snapshot of / first. History > Undo reverses a change (`graphite-agent actions`,
+`approve ID`, `deny ID`, `undo ID` in a terminal). It never runs commands or deletes files. Notes: say "remember ..." (or use the Notes tab, or
 `graphite-agent remember "..."`) and it keeps that note on this computer and may use it in
 answers; `graphite-agent notes`, `forget ID|--all` and `export FILE` show, delete and export them.
 History keeps your questions for 30 days (`graphite-agent history off|clear`). Stop ends an
