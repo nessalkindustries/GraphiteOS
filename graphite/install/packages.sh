@@ -3,7 +3,9 @@
 if ((PACKAGES)); then
   # pipewire-jack named explicitly: otherwise pacman resolves the "jack" dependency
   # of some desktop packages to jack2, which conflicts with pipewire-jack.
-  pkgs=(pipewire-jack graphite-config graphite-desktop)
+  # graphite-agent: local assistant (Super+Shift+A) + llama-cpp; graphite-agent-model: its
+  # offline model (~1.4 GB; graphite-iso-install has already put it in from the ISO)
+  pkgs=(pipewire-jack graphite-config graphite-desktop graphite-agent graphite-agent-model)
   [[ $PROFILE == full ]] && pkgs+=(graphite-gaming graphite-dev)
   ((NVIDIA)) && pkgs+=(graphite-nvidia)
   pacman -Syu --needed --noconfirm "${pkgs[@]}"

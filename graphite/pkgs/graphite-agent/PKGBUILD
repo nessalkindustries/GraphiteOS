@@ -1,0 +1,28 @@
+# shellcheck shell=bash disable=SC2034,SC2154
+# Graphite Agent, Stage 1 (installed by default: build.sh + install/packages.sh):
+# read-only local assistant panel (Super+Shift+A).
+# The model is the separate graphite-agent-model package (~1.4 GB, installed by default);
+# `graphite-agent setup-model` is the repair/fallback. graphite-llm.service: user unit, never enabled.
+pkgname=graphite-agent
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Graphite Agent: offline read-only assistant (llama.cpp, local Qwen model)"
+arch=(any)
+url="https://github.com/nessalkindustries/GraphiteOS"
+license=(MIT)
+depends=(python llama-cpp quickshell graphite-config libarchive)
+# the model: graphite-agent-model (installed by default; setup-model is the fallback)
+optdepends=("graphite-agent-model: the offline model (installed by default)"
+            "kitty: setup-model window from the panel")
+
+package() {
+  local src=${GRAPHITE_SRC:-$startdir/../..}
+  install -Dm755 "$src/agent/graphite-agent" "$pkgdir/usr/bin/graphite-agent"
+  install -Dm644 "$src/agent/graphite-llm.service" "$pkgdir/usr/lib/systemd/user/graphite-llm.service"
+  install -Dm644 "$src/agent/help.md" "$pkgdir/usr/share/graphite-agent/help.md"
+  install -Dm644 "$src/agent/quickshell/shell.qml" "$pkgdir/usr/share/graphite-agent/quickshell/shell.qml"
+  # keybind list for the graphite_help tool, from the shipped Hyprland config (no drift)
+  WAYLAND_DISPLAY='' PATH="$src/bin:$PATH" bash "$src/bin/graphite-keybinds" \
+    "$src/templates/hypr-lua/hyprland.lua" > "$pkgdir/usr/share/graphite-agent/keybinds.txt"
+  [[ -s $pkgdir/usr/share/graphite-agent/keybinds.txt ]]
+}

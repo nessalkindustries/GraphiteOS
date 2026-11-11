@@ -86,7 +86,11 @@ if [ -f "$OUT/graphite-repo/graphite.pub" ]; then
 else
   printf '\n[graphite]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$OUT/graphite-repo" >> "$PROFILE/pacman.conf"
 fi
-{ echo "pipewire-jack"; echo "graphite-config"; echo "graphite-desktop"; echo "graphite-gaming"; echo "graphite-dev"
+# graphite-agent-model (~1.4 GB, a graphite-desktop dependency) gets no files in the live system:
+# pacman.conf NoExtract's its GGUF, which ships once, as the package in /opt/graphite-repo that
+# graphite-iso-install puts on the target. The live session can still try the agent offline:
+# `graphite-agent setup-model` extracts the model from that package into RAM.
+{ echo "pipewire-jack"; echo "graphite-config"; echo "graphite-desktop"; echo "graphite-agent"; echo "graphite-gaming"; echo "graphite-dev"
   [ "$NVIDIA" = 1 ] && echo "graphite-nvidia"; } >> "$PROFILE/packages.x86_64"
 
 # 3. embed installer tree + repo

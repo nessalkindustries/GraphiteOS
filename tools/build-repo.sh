@@ -11,8 +11,8 @@ cd "$(dirname "$0")/.."
 REPO_OUT=${REPO_OUT:-$PWD/out/graphite-repo}
 if [[ ${1:-} == --container ]]; then
   ENG=$(command -v podman || command -v docker) || { echo "need podman or docker" >&2; exit 1; }
-  mkdir -p "$REPO_OUT"
-  exec sudo "$ENG" run --rm --network host -v "$PWD":/src:ro -v "$REPO_OUT":/repo \
+  mkdir -p "$REPO_OUT"; SRCCACHE=${GRAPHITE_SRCDEST:-$PWD/out/srcdest}; mkdir -p "$SRCCACHE"
+  exec sudo "$ENG" run --rm --network host -v "$PWD":/src:ro -v "$REPO_OUT":/repo -v "$SRCCACHE":/srcdest -e GRAPHITE_SRCDEST=/srcdest \
     -e GRAPHITE_SIGN_KEY="${GRAPHITE_SIGN_KEY:-}" -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" -e GRAPHITE_PKGREL_BUMP="${GRAPHITE_PKGREL_BUMP:-}" ${GRAPHITE_SIGN_KEY:+-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg} docker.io/archlinux/archlinux:latest \
     bash -c "pacman -Sy --noconfirm --needed base-devel >/dev/null && REPO_OUT=/repo /src/tools/build-repo.sh"
 fi
@@ -21,11 +21,13 @@ command -v makepkg >/dev/null || { echo "makepkg not found (use --container)" >&
 WORK=${GRAPHITE_REPO_WORK:-/tmp/graphite-repo-build}; rm -rf "$WORK"; mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
 cp -r graphite "$WORK/graphite"
 mkdir -p "$REPO_OUT"
+# makepkg download cache, kept between builds: graphite-agent-model's GGUF is ~1.4 GB
+SRCDEST=${GRAPHITE_SRCDEST:-$PWD/out/srcdest}; mkdir -p "$SRCDEST"
 run() { if [[ $EUID -eq 0 ]]; then runuser -u builder -- "$@"; else "$@"; fi; }
-if [[ $EUID -eq 0 ]]; then id builder >/dev/null 2>&1 || useradd -m builder; chown -R builder "$WORK"; fi
+if [[ $EUID -eq 0 ]]; then id builder >/dev/null 2>&1 || useradd -m builder; chown -R builder "$WORK" "$SRCDEST"; fi
 # GRAPHITE_PKGREL_BUMP=N: append .N to every pkgrel (test builds of a "newer" repo: tests/qemu-install.py)
 if [[ -n ${GRAPHITE_PKGREL_BUMP:-} ]]; then sed -i -E "s/^pkgrel=([0-9]+)$/pkgrel=\\1.$GRAPHITE_PKGREL_BUMP/" "$WORK"/graphite/pkgs/*/PKGBUILD; fi
-pkgs=(graphite-config graphite-meta graphite-themes)
+pkgs=(graphite-config graphite-meta graphite-themes graphite-agent graphite-agent-model)
 if [[ -n ${GRAPHITE_SIGN_KEY:-} ]]; then
   # graphite-keyring: the signing key + any extra public keys in keys/*.asc (rotation)
   KR="$WORK/keyring"; mkdir -p "$KR"
@@ -39,7 +41,7 @@ if [[ -n ${GRAPHITE_SIGN_KEY:-} ]]; then
   pkgs+=(graphite-keyring)
 fi
 for p in "${pkgs[@]}"; do
-  (cd "$WORK/graphite/pkgs/$p" && run env GRAPHITE_SRC="$WORK/graphite" PKGDEST="$WORK/pkgs" GRAPHITE_KEYRING_DIR="$WORK/keyring" makepkg -f --nodeps --noconfirm >/dev/null)
+  (cd "$WORK/graphite/pkgs/$p" && run env GRAPHITE_SRC="$WORK/graphite" SRCDEST="$SRCDEST" PKGDEST="$WORK/pkgs" GRAPHITE_KEYRING_DIR="$WORK/keyring" makepkg -f --nodeps --noconfirm >/dev/null)
 done
 rm -f "$REPO_OUT"/*.pkg.tar.* "$REPO_OUT"/graphite.* "$REPO_OUT"/graphite.pub "$REPO_OUT"/graphite.fpr
 cp "$WORK"/pkgs/*.pkg.tar.zst "$REPO_OUT/"
