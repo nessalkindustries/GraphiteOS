@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""graphite-agent (Stage 5): a local assistant for Graphite OS.
+"""graphite-agent (Stage 6): a local assistant for Graphite OS.
 
 Local inference only (llama.cpp `llama-server`, user service graphite-llm.service, 127.0.0.1).
 A user-session daemon (graphite-agent.socket/.service, a 0600 Unix socket in XDG_RUNTIME_DIR,
@@ -13,7 +13,10 @@ panel, snapshot first, and can be undone. Voice is offline too (whisper.cpp in, 
 audio stays in RAM and is deleted once transcribed. Several agents (Stage 5): a coordinator hands
 sub-tasks to specialists (system, settings, software, notes, help), each with its own prompt and
 tool list, one after another on the same local model; every hop is in the audit log.
-No shell, no file edits by the model, no cloud.
+Optional Grok tier (Stage 6, off by default): the user's own xAI API key (keyring, else a 0600
+file), HTTPS to xAI's chat completions, same tools and approvals, notes and file contents kept
+local unless opted in, a daily request cap, the local model on any error.
+No shell, no file edits by the model.
 
   graphite-agent ask [--jsonl] QUESTION   answer one question (panel uses --jsonl)
   graphite-agent toggle|open|close        the panel (qs -c graphite-agent), Super+Shift+A
@@ -27,6 +30,9 @@ No shell, no file edits by the model, no cloud.
   graphite-agent history [--json] [N]     recent questions; history clear|on|off
   graphite-agent audit [TASK] [--json]    tool calls, agent hops and state changes of recent tasks
   graphite-agent agents [on|off] [--json] the specialist agents and their tools; off = one agent
+  graphite-agent cloud [status|on|off]    the optional Grok tier (your own xAI API key; off by
+                                          default); cloud key (stdin) | forget-key | model NAME |
+                                          cap N | share-notes on|off | share-files on|off
   graphite-agent actions [--json]         proposed changes and their state
   graphite-agent approve|deny ID          run (snapshot first) or drop a proposed change
   graphite-agent undo ID                  reverse a done change (refused if changed since)
@@ -44,7 +50,7 @@ No shell, no file edits by the model, no cloud.
 The model normally comes from the graphite-agent-model package (/usr/share/graphite-agent/models).
 """
 import glob, hashlib, http.client, json, os, platform, re, shutil, signal, socket, socketserver
-import sqlite3, struct, subprocess, sys, threading, time
+import sqlite3, ssl, struct, subprocess, sys, threading, time
 import urllib.error, urllib.parse, urllib.request
 
 SHARE = os.environ.get("GRAPHITE_AGENT_SHARE", "/usr/share/graphite-agent")
@@ -553,6 +559,20 @@ class Store:
             os.umask(old)
         self.lock = threading.Lock()
 
+    def cloud_take(self, cap):
+        """Count one cloud request against today's cap; False if the cap is reached."""
+        day = time.strftime("%Y-%m-%d")
+        with self.lock:
+            if self.pref("cloud_day") != day:
+                self.set_pref("cloud_day", day)
+                self.set_pref("cloud_used", "0")
+            used = int(self.pref("cloud_used", "0"))
+            if used >= cap:
+                return False
+            self.set_pref("cloud_used", str(used + 1))
+            return True
+    def cloud_used(self):
+        return int(self.pref("cloud_used", "0")) if self.pref("cloud_day") == time.strftime("%Y-%m-%d") else 0
     def pref(self, key, default=None):
         r = self.db.execute("SELECT value FROM prefs WHERE key=?", (key,)).fetchone()
         return r[0] if r else default
@@ -648,9 +668,11 @@ class Store:
         ts = [dict(zip(("id", "created", "state", "question", "answer", "error", "tool_calls"), r))
               for r in self.db.execute("SELECT id,created,state,question,answer,error,tool_calls "
                                        "FROM tasks ORDER BY id DESC LIMIT ?", (n,))]
-        for t in ts:     # which agents worked on it, in order (Stage 5 hop events)
+        for t in ts:     # which agents worked on it, in order (Stage 5 hop events); cloud or not
             t["agents"] = [json.loads(d).get("agent") for (d,) in self.db.execute(
                 "SELECT data FROM events WHERE task_id=? AND kind='hop' ORDER BY id", (t["id"],))]
+            t["cloud"] = bool(self.db.execute("SELECT 1 FROM events WHERE task_id=? AND kind='backend' "
+                                              "AND data LIKE '%\"cloud\"%'", (t["id"],)).fetchone())
         return ts
     def events(self, tid=None, n=50):
         q, a = ("WHERE task_id=?", (tid, n)) if tid else ("", (n,))
@@ -705,9 +727,11 @@ class Store:
 
 # ---------------------------------------------------------------- model client
 
-def system_prompt():
+def system_prompt(cloud=False):
     summary = _help_sections().get("summary", "")
-    return ("You are the Graphite OS assistant, running fully offline on this computer. "
+    where = ("This answer runs on xAI's Grok in the cloud, at the user's request; the tools run on "
+             "the user's computer. " if cloud else "")
+    return ("You are the Graphite OS assistant" + (". " if cloud else ", running fully offline on this computer. ") + where +
             "Answer briefly and plainly. Use the tools for facts about this system; never guess "
             "versions or numbers, and don't narrate which tool you use. You cannot run commands or edit files. You can only PROPOSE three kinds of change "
             "with tools: change_setting (theme, bar, display scale, keyboard layout, pointer), "
@@ -740,6 +764,9 @@ class Out:
             print(kw["text"], flush=True)
         elif kind == "action":
             print(f"\n[Proposed change a{kw['id']}: {kw['summary']}. Approve: graphite-agent approve {kw['id']}]", flush=True)
+        elif kind == "backend":   # always say where an answer goes
+            print(f"[Sent to Grok in the cloud ({kw.get('model')})]" if kw["name"] == "cloud" else
+                  f"[Answered on this computer: {kw.get('reason')}]", file=sys.stderr, flush=True)
 
 def health():
     try:
@@ -779,6 +806,7 @@ class Ctx:
         self.deadline = time.time() + deadline
         self.hop_end = None                  # the running hop's (or plan's) own time limit
         self.conn, self.calls, self.seen, self.proposed, self.hops = None, 0, set(), False, 0
+        self.cloud, self.store, self.tid, self.local_prompt, self.partial = None, None, None, None, False
     def cancel(self):
         self.cancelled.set()
         c = self.conn
@@ -793,9 +821,9 @@ class Ctx:
 
 TOOL_TEXT = "<tool_call>"
 
-def stream_chat(messages, tools, out, ctx=None, extra=None):
-    """One streamed completion offering `tools` (schemas, or None). Emits tokens; returns
-    (content, tool_calls)."""
+def stream_chat(messages, tools, out, ctx=None, extra=None, cloud=None):
+    """One streamed completion offering `tools` (schemas, or None), from llama-server or (cloud)
+    the xAI endpoint. Emits tokens; returns (content, tool_calls)."""
     ctx = ctx or Ctx()
     body = {"messages": messages, "stream": True, "temperature": 0.3, "max_tokens": 700}
     if tools:
@@ -803,16 +831,27 @@ def stream_chat(messages, tools, out, ctx=None, extra=None):
     body.update(extra or {})
     if ctx.left() <= 0:
         raise TimeoutError("time limit")
-    u = urllib.parse.urlsplit(LLM)
-    conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=max(1.0, min(300, ctx.left())))
+    headers = {"Content-Type": "application/json"}
+    if cloud:
+        u = urllib.parse.urlsplit(CLOUD_URL)
+        body["model"] = cloud.model
+        headers["Authorization"] = "Bearer " + cloud.key      # only ever in this header
+        t = max(1.0, min(CLOUD_TIMEOUT, ctx.left()))
+        conn = (http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=t,
+                                            context=ssl.create_default_context())
+                if u.scheme == "https" else http.client.HTTPConnection(u.hostname, u.port or 80, timeout=t))
+        path = u.path.rstrip("/") + "/chat/completions"
+    else:
+        u = urllib.parse.urlsplit(LLM)
+        conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=max(1.0, min(300, ctx.left())))
+        path = "/v1/chat/completions"
     ctx.conn = conn
-    content, calls, held, dropped = [], {}, "", False
+    content, calls, held, dropped, finished = [], {}, "", False, False
     try:
-        conn.request("POST", "/v1/chat/completions", json.dumps(body).encode(),
-                     {"Content-Type": "application/json"})
+        conn.request("POST", path, json.dumps(body).encode(), headers)
         r = conn.getresponse()
         if r.status != 200:
-            raise OSError(f"llama-server answered HTTP {r.status}")
+            raise CloudError(r.status) if cloud else OSError(f"llama-server answered HTTP {r.status}")
         while True:
             if ctx.cancelled.is_set():
                 raise Cancelled()
@@ -826,6 +865,7 @@ def stream_chat(messages, tools, out, ctx=None, extra=None):
                 continue
             data = line[5:].strip()
             if data == "[DONE]":
+                finished = True
                 break
             try:
                 delta = json.loads(data)["choices"][0].get("delta") or {}
@@ -841,6 +881,7 @@ def stream_chat(messages, tools, out, ctx=None, extra=None):
                 keep = 0 if dropped else next((n for n in range(min(len(held), len(TOOL_TEXT) - 1), 0, -1)
                                               if TOOL_TEXT.startswith(held[-n:])), 0)
                 if len(held) > keep:
+                    ctx.partial = True
                     content.append(held[:len(held) - keep])
                     out.emit("token", text=held[:len(held) - keep])
                 held = held[len(held) - keep:]
@@ -863,10 +904,163 @@ def stream_chat(messages, tools, out, ctx=None, extra=None):
         conn.close()
     if ctx.cancelled.is_set():
         raise Cancelled()
+    if cloud and not finished:
+        raise ConnectionError("the cloud stream ended early")
     if held and not dropped:
         content.append(held)
         out.emit("token", text=held)
     return "".join(content), [calls[i] for i in sorted(calls)]
+
+# ---------------------------------------------------------------- Grok tier (Stage 6, optional)
+# Off by default. With the user's own xAI API key (their keyring through Secret Service /
+# secret-tool, else a 0600 file) answers go to xAI's OpenAI-compatible chat completions endpoint
+# over HTTPS (certificate checked). Same tools (they run here, validated here) and the same
+# approval cards. Notes and config-file contents stay on this computer unless the user opts in;
+# history is never sent. A cloud error, no network or the daily request cap -> the local model
+# answers. The key is never logged, printed, stored in the db or passed on a command line.
+CLOUD_URL = os.environ.get("GRAPHITE_AGENT_CLOUD_URL", "https://api.x.ai/v1")
+CLOUD_MODEL = "grok-4.7"                 # default; `graphite-agent cloud model NAME`
+CLOUD_CAP = 50                           # cloud requests per day (a question uses 1-4)
+CLOUD_TIMEOUT = 60                       # s without data from the cloud -> local
+KEY_ATTRS = ["service", "graphite-agent", "account", "xai-api-key"]
+KEY_FILE = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                        "graphite-agent", "xai-api-key")
+KEY_RE = re.compile(r"[A-Za-z0-9._~+/=-]{20,256}")
+PRIVATE_TOOLS = {"search_notes": "cloud_notes", "read_config": "cloud_files"}   # tool -> opt-in pref
+
+class Cloud:
+    def __init__(self, key, model):
+        self.key, self.model = key, model
+    def __repr__(self):
+        return f"Cloud({self.model})"     # never the key
+
+class CloudError(OSError):
+    def __init__(self, status):
+        super().__init__(status)
+        self.status = status
+    def __str__(self):
+        return {401: "xAI refused the API key (HTTP 401)", 403: "xAI refused the API key (HTTP 403)",
+                429: "xAI rate limit or no credits left (HTTP 429)"}.get(
+                    self.status, f"xAI answered HTTP {self.status}")
+
+def _cloud_why(e):
+    """A short reason for the panel/audit: never a response body, never the key."""
+    if isinstance(e, CloudError):
+        return str(e)
+    if isinstance(e, ssl.SSLError):
+        return "the cloud's TLS certificate didn't verify"
+    if isinstance(e, (socket.timeout, TimeoutError)):
+        return "the cloud didn't answer in time"
+    if isinstance(e, socket.gaierror):
+        return "offline (no DNS)"
+    if isinstance(e, ConnectionRefusedError) or getattr(e, "errno", None) in (101, 113):
+        return "couldn't reach the cloud"     # refused, ENETUNREACH, EHOSTUNREACH
+    if isinstance(e, ConnectionError):
+        return "the cloud connection dropped"
+    return "cloud request failed"
+
+def cloud_url_ok():
+    u = urllib.parse.urlsplit(CLOUD_URL)
+    return bool(u.hostname) and (u.scheme == "https" or (u.scheme == "http" and u.hostname in
+                                                          ("127.0.0.1", "localhost", "::1")))
+
+def _secret_tool(args, stdin=None):
+    try:
+        r = subprocess.run(["secret-tool"] + args, input=stdin, capture_output=True, text=True,
+                           timeout=10)
+        return r.returncode, r.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, ""
+
+def key_load():
+    """(key, where): the keyring first, else the 0600 file; (None, why) if there is none."""
+    rc, o = _secret_tool(["lookup"] + KEY_ATTRS)
+    if rc == 0 and o.strip():
+        return o.strip(), "keyring"
+    try:
+        st = os.stat(KEY_FILE)
+    except OSError:
+        return None, "none"
+    if st.st_uid != os.getuid() or st.st_mode & 0o077:
+        return None, "file has unsafe permissions (ignored)"
+    k = _read(KEY_FILE).strip()
+    return (k, "file") if k else (None, "none")
+
+def key_save(key):
+    key = (key or "").strip()
+    if not KEY_RE.fullmatch(key):
+        raise ValueError("that doesn't look like an xAI API key")
+    rc, _ = _secret_tool(["store", "--label=Graphite Agent: xAI API key"] + KEY_ATTRS, key)
+    if rc == 0 and _secret_tool(["lookup"] + KEY_ATTRS)[1].strip() == key:
+        try:
+            os.remove(KEY_FILE)              # one copy only
+        except OSError:
+            pass
+        return "keyring"
+    d = os.path.dirname(KEY_FILE)            # no Secret Service (e.g. no keyring daemon): 0600 file
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    os.chmod(d, 0o700)
+    tmp = KEY_FILE + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, (key + "\n").encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, KEY_FILE)
+    return "file"
+
+def key_forget():
+    _secret_tool(["clear"] + KEY_ATTRS)
+    try:
+        os.remove(KEY_FILE)
+    except OSError:
+        pass
+
+def cloud_backend(store, noted):
+    """(Cloud or None, why it is local) for one question."""
+    if store.pref("cloud", "off") != "on":
+        return None, None
+    if noted and store.pref("cloud_notes", "off") != "on":
+        return None, "it matches your notes, which stay on this computer"
+    if not cloud_url_ok():
+        return None, "the cloud address must be https"
+    key, where = key_load()
+    if not key:
+        return None, "no xAI API key" + (f" ({where})" if where != "none" else "")
+    return Cloud(key, store.pref("cloud_model", CLOUD_MODEL)), None
+
+def cloud_shares(store, tool):
+    return store.pref(PRIVATE_TOOLS[tool], "off") == "on" if tool in PRIVATE_TOOLS else True
+
+def chat(messages, tools, out, ctx, extra=None):
+    """stream_chat on the question's backend: the cloud while it works and the daily cap allows,
+    else (from then on, for the rest of the question) the local model."""
+    if ctx.cloud:
+        why = None
+        if not ctx.store.cloud_take(int(ctx.store.pref("cloud_cap", str(CLOUD_CAP)))):
+            why = "today's cloud request limit is reached"
+        else:
+            try:
+                ctx.partial = False
+                return stream_chat(messages, tools, out, ctx, extra, ctx.cloud)
+            except Cancelled:
+                raise
+            except (OSError, http.client.HTTPException, TimeoutError) as e:
+                if ctx.left() <= 0:
+                    raise TimeoutError("time limit")
+                why = _cloud_why(e)
+        ctx.cloud = None
+        ctx.store.event(ctx.tid, "backend", name="local", reason=why)
+        out.emit("backend", name="local", reason=why)
+        if ctx.partial:              # part of a cloud answer is already shown: start a new line
+            out.emit("token", text="\n\n")
+        if ctx.local_prompt:
+            messages[0] = {"role": "system", "content": ctx.local_prompt()}
+        if not ensure_server(out):
+            raise OSError("the local model isn't available either")
+    return stream_chat(messages, tools, out, ctx, extra)
 
 # ---------------------------------------------------------------- agents (Stage 5)
 # A coordinator splits a question into at most MAX_HOPS sub-tasks for named specialist agents.
@@ -910,9 +1104,9 @@ def agent_schemas(name):
     allowed = agent_tools(name)
     return [s for s in SCHEMAS if s["function"]["name"] in allowed]
 
-def agent_prompt(name):
+def agent_prompt(name, cloud=False):
     if AGENTS[name][1] is None:
-        return system_prompt()
+        return system_prompt(cloud)
     label, _, role = AGENTS[name]
     summary = _help_sections().get("summary", "")
     return (f"You are the {label} agent of the Graphite OS assistant, running fully offline on this "
@@ -972,7 +1166,7 @@ def make_plan(question, ctx, noted=False):
         "type": "json_schema", "json_schema": {"name": "plan", "schema": PLAN_SCHEMA}}}
     ctx.hop_end = time.time() + PLAN_TIME
     try:
-        content, _ = stream_chat(messages, None, _Silent(), ctx, extra)
+        content, _ = chat(messages, None, _Silent(), ctx, extra)
     except TimeoutError:
         if ctx.deadline - time.time() <= 0:
             raise
@@ -1019,11 +1213,19 @@ def answer(question, out, ctx=None, store=None):
         store.transition(tid, "done", answer=msg)
         out.emit("done")
         return 0
-    if not ensure_server(out):
+    hits = store.search(question, 3)
+    cloud, why_local = cloud_backend(store, bool(hits))
+    if not cloud and not ensure_server(out):
         return 1
     tid = store.new_task(question)
+    ctx.cloud, ctx.store, ctx.tid = cloud, store, tid
+    if cloud:          # the indicator: this answer goes to xAI's servers
+        store.event(tid, "backend", name="cloud", model=cloud.model)
+        out.emit("backend", name="cloud", model=cloud.model)
+    elif why_local:    # the Grok tier is on, but this one stays local
+        store.event(tid, "backend", name="local", reason=why_local)
+        out.emit("backend", name="local", reason=why_local)
     notes = ""
-    hits = store.search(question, 3)
     if hits:
         out.emit("notes", ids=[f"n{i}" for i, _ in hits])
         store.event(tid, "notes_used", ids=[i for i, _ in hits])
@@ -1031,8 +1233,9 @@ def answer(question, out, ctx=None, store=None):
                  "\n".join(f"[n{i}] {t}" for i, t in hits))
     full = []
     try:
-        multi = store.pref("agents", "on") == "on"
-        steps, why = make_plan(question, ctx, bool(hits)) if multi else (None, "agents off")
+        multi = store.pref("agents", "on") == "on" and not cloud   # Grok: one agent, every tool
+        steps, why = (make_plan(question, ctx, bool(hits)) if multi else
+                      (None, "cloud: one agent" if cloud else "agents off"))
         if not steps:
             steps = [{"agent": "general", "task": ""}]
         store.event(tid, "plan", agents=[s["agent"] for s in steps], tasks=[s["task"] for s in steps],
@@ -1081,14 +1284,18 @@ def run_hop(n, steps, question, notes, found, out, ctx, store, tid, full):
         user = question if not notes else "Question: " + question
     if notes:
         user = notes + "\n\n" + user
-    messages = [{"role": "system", "content": agent_prompt(name)}, {"role": "user", "content": user}]
-    schemas = agent_schemas(name)
+    messages = [{"role": "system", "content": agent_prompt(name, bool(ctx.cloud))},
+                {"role": "user", "content": user}]
+    ctx.local_prompt = lambda: agent_prompt(name)
+    # to the cloud: no notes or config-file tools unless the user opted in
+    schemas = [x for x in agent_schemas(name) if not ctx.cloud or ctx.store is None
+               or cloud_shares(ctx.store, x["function"]["name"])]
     seen, mine, calls0 = set(), [], ctx.calls
     ctx.hop_end = time.time() + HOP_TIME
     try:
         for rnd in range(MAX_ROUNDS + 1):
             # the last round offers no tools, so the model has to answer with what it has
-            content, calls = stream_chat(messages, schemas if rnd < MAX_ROUNDS else None, out, ctx)
+            content, calls = chat(messages, schemas if rnd < MAX_ROUNDS else None, out, ctx)
             full.append(content)
             mine.append(content)
             if not calls:
@@ -1106,6 +1313,11 @@ def run_hop(n, steps, question, notes, found, out, ctx, store, tid, full):
                     ok, result = False, {"error": "tool-call limit reached; answer with what you have"}
                 elif key in seen:
                     ok, result = False, {"error": "already called with these arguments; use that result"}
+                elif ctx.cloud and c["name"] in PRIVATE_TOOLS and not cloud_shares(store, c["name"]):
+                    ctx.calls += 1
+                    seen.add(key)
+                    ok, result = False, {"error": f"{c['name']} is not available to the cloud model "
+                                                  "(the user keeps that on this computer)"}
                 elif c["name"] in ALL_TOOLS and c["name"] not in allowed:
                     ctx.calls += 1
                     seen.add(key)
@@ -1906,6 +2118,7 @@ def status(as_json):
     st["notes"] = len(db.notes()) if db else 0
     st["history"] = db.pref("history", "on") if db else "unknown"
     st["agents"] = db.pref("agents", "on") if db else "unknown"
+    st["cloud"] = cloud_status(db)
     st.update(voice_state())
     if as_json:
         print(json.dumps(st))
@@ -2068,6 +2281,73 @@ def notes_cmd(cmd, args):
         return 0
     return 2
 
+def cloud_status(db):
+    """Everything about the Grok tier except the key itself."""
+    key, where = key_load()
+    if not db:
+        return {"enabled": False, "key": where if key else "none"}
+    return {"enabled": db.pref("cloud", "off") == "on", "key": where if key else "none",
+            "model": db.pref("cloud_model", CLOUD_MODEL), "cap": int(db.pref("cloud_cap", str(CLOUD_CAP))),
+            "used_today": db.cloud_used(), "share_notes": db.pref("cloud_notes", "off") == "on",
+            "share_files": db.pref("cloud_files", "off") == "on",
+            "endpoint": urllib.parse.urlsplit(CLOUD_URL).hostname}
+
+def cloud_cmd(args):
+    """cloud [status|on|off|key|forget-key|model NAME|cap N|share-notes on|off|share-files on|off]"""
+    db = Store()
+    js = "--json" in args
+    args = [a for a in args if a != "--json"]
+    cmd = args[0] if args else "status"
+    def say(msg, rc=0):
+        print(msg, file=sys.stderr if rc else sys.stdout)
+        return rc
+    if cmd == "on":
+        if not key_load()[0]:
+            return say("Add your xAI API key first: graphite-agent cloud key (reads it from stdin)", 1)
+        db.set_pref("cloud", "on")
+        say("Grok tier: on. Questions go to xAI (your key, your account) unless they match your "
+            "notes; it falls back to the local model on any error.")
+    elif cmd == "off":
+        db.set_pref("cloud", "off")
+        say("Grok tier: off. Everything stays on this computer.")
+    elif cmd == "key":     # read from stdin only: never an argument (ps, shell history)
+        if sys.stdin.isatty():
+            import getpass
+            key = getpass.getpass("xAI API key (input hidden): ")
+        else:
+            key = sys.stdin.readline()
+        try:
+            where = key_save(key)
+        except (ValueError, OSError) as e:
+            return say(f"Not saved: {e}.", 1)
+        say("Saved in your keyring." if where == "keyring" else
+            f"No keyring available: saved to {KEY_FILE} (only you can read it).")
+    elif cmd == "forget-key":
+        key_forget()
+        db.set_pref("cloud", "off")
+        say("API key removed; Grok tier off.")
+    elif cmd == "model" and len(args) == 2 and re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", args[1]):
+        db.set_pref("cloud_model", args[1])
+        say(f"Grok model: {args[1]}")
+    elif cmd == "cap" and len(args) == 2 and args[1].isdigit() and 0 <= int(args[1]) <= 10000:
+        db.set_pref("cloud_cap", str(int(args[1])))
+        say(f"At most {int(args[1])} cloud requests per day.")
+    elif cmd in ("share-notes", "share-files") and len(args) == 2 and args[1] in ("on", "off"):
+        db.set_pref("cloud_notes" if cmd == "share-notes" else "cloud_files", args[1])
+        say(f"{'Notes' if cmd == 'share-notes' else 'Config file contents'} "
+            f"{'may now be sent to' if args[1] == 'on' else 'are not sent to'} the cloud model.")
+    elif cmd != "status":
+        return say("usage: graphite-agent cloud [status|on|off|key|forget-key|model NAME|cap N|"
+                   "share-notes on|off|share-files on|off] [--json]", 2)
+    if cmd == "status" or js:
+        st = cloud_status(db)
+        if js:
+            print(json.dumps(st))
+        else:
+            for k, v in st.items():
+                print(f"{k}: {v}")
+    return 0
+
 def agents_cmd(args):
     """agents [on|off] [--json]: the specialists and their tools; on = coordinator + specialists,
     off = one general agent with every tool (Stage 4 behaviour)."""
@@ -2133,6 +2413,12 @@ def main(argv):
             return 1
     if cmd == "agents":
         return agents_cmd(argv[1:])
+    if cmd == "cloud":
+        try:
+            return cloud_cmd(argv[1:])
+        except (OSError, sqlite3.Error) as e:
+            print(f"graphite-agent: {e}", file=sys.stderr)
+            return 1
     if cmd in ("remember", "notes", "forget", "export", "history", "audit"):
         try:
             return notes_cmd(cmd, argv[1:])

@@ -3,13 +3,13 @@
 # outside the model, 3-round tool cap, streaming client against a scripted mock llama-server,
 # service/panel/keybind wiring; Stage 2: session daemon (socket, one task at a time, cancel,
 # crash -> interrupted without replay, limits), config path checks, notes (FTS5), history; Stage 3: proposed
-# changes, approve/undo; Stage 4: offline voice (fake recorder/whisper/RHVoice/player); Stage 5: coordinator + specialist agents. The live test with the real model is agent-live.sh.
+# changes, approve/undo; Stage 4: offline voice (fake recorder/whisper/RHVoice/player); Stage 5: coordinator + specialist agents; Stage 6: the optional Grok tier against a local HTTPS mock (no real API, no real key). The live test with the real model is agent-live.sh.
 # shellcheck disable=SC2015,SC2016  # ok/bad one-liners, like the other tests
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0; ok() { echo "ok   $1"; }; bad() { echo "FAIL $1"; fail=1; }
 A=graphite/agent/graphite-agent
-t=$(mktemp -d); trap 'kill "${mock:-}" "${dpid:-}" "${d4:-}" 2>/dev/null || true; rm -rf "$t"' EXIT
+t=$(mktemp -d); trap 'kill "${mock:-}" "${dpid:-}" "${d4:-}" "${cmock:-}" "${d6:-}" 2>/dev/null || true; rm -rf "$t"' EXIT
 export GRAPHITE_AGENT_SOCK=$t/run/agent.sock GRAPHITE_AGENT_DATA=$t/data
 python3 -c "import ast,sys; ast.parse(open('$A').read())" && ok "graphite-agent parses" || bad "graphite-agent syntax"
 # stdlib only
@@ -504,4 +504,135 @@ c5 agents off >/dev/null; out=$(a5 version)
 c5 agents on >/dev/null
 grep -q 'm.type === "agent"' graphite/agent/quickshell/shell.qml && grep -q 'Multiple agents: ' graphite/agent/quickshell/shell.qml && grep -q 'modelData.agents' graphite/agent/quickshell/shell.qml \
   && ok "panel: shows which agent did what, per-question agents in History, on/off toggle" || bad "panel agents"
+# ---------------------------------------------------------------- Stage 6: optional Grok tier (local HTTPS mock only: no real API, no real key)
+H6=$t/s6home; mkdir -p "$H6" "$t/stbin" "$t/tls"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$t/tls/key.pem" -out "$t/tls/cert.pem" -days 1 -subj /CN=localhost \
+  -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" >/dev/null 2>&1
+cat > "$t/cloud.py" <<'PY'
+import json, os, ssl, sys, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+log, mode = sys.argv[2], sys.argv[3]
+def sse(h, chunks):
+    h.send_response(200); h.send_header("Content-Type", "text/event-stream"); h.end_headers()
+    for c in chunks: h.wfile.write(b"data: " + json.dumps({"choices": [{"delta": c}]}).encode() + b"\n\n")
+    h.wfile.write(b"data: [DONE]\n\n")
+def call(name, args="{}"):
+    return [{"tool_calls": [{"index": 0, "id": "x1", "function": {"name": name, "arguments": args}}]}]
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_POST(self):
+        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        open(log, "a").write(json.dumps({"path": self.path, "auth": self.headers.get("Authorization"), "req": req}) + "\n")
+        m = open(mode).read().strip() if os.path.exists(mode) else "ok"
+        if m.isdigit(): self.send_response(int(m)); self.end_headers(); self.wfile.write(b'{"error": "Incorrect API key provided: xa***"}'); return
+        q = req["messages"][1]["content"]; seen = [x for x in req["messages"] if x.get("role") == "tool"]
+        if m == "drop":
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+            self.wfile.write(b"data: " + json.dumps({"choices": [{"delta": {"content": "CLOUD half "}}]}).encode() + b"\n\n"); self.wfile.flush()
+            self.connection.shutdown(2); return
+        if q.startswith("slow"):
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+            try:
+                for i in range(100):
+                    self.wfile.write(b"data: " + json.dumps({"choices": [{"delta": {"content": f"c{i} "}}]}).encode() + b"\n\n"); self.wfile.flush(); time.sleep(0.1)
+            except OSError: pass
+            return
+        if not seen and q == "version": return sse(self, call("os_release"))
+        if not seen and q == "readconf": return sse(self, call("read_config", json.dumps({"path": "~/.config/hypr/hyprland.conf"})))
+        if not seen and q.startswith("propose "): _, tool, args = q.split(" ", 2); return sse(self, call(tool, args))
+        sse(self, [{"content": "CLOUD "}, {"content": seen[-1]["content"] if seen else q}])
+srv = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H)
+cx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); cx.load_cert_chain(sys.argv[4], sys.argv[5])
+srv.socket = cx.wrap_socket(srv.socket, server_side=True)
+srv.serve_forever()
+PY
+cport=$((20000 + RANDOM % 20000)); [[ $cport == "$port" ]] && cport=$((cport + 1))
+python3 "$t/cloud.py" "$cport" "$t/cloud.log" "$t/cloud.mode" "$t/tls/cert.pem" "$t/tls/key.pem" & cmock=$!
+for _ in $(seq 50); do curl -sk -X POST -d '{"messages": [{}, {"role": "user", "content": "probe"}]}' "https://127.0.0.1:$cport/" >/dev/null 2>&1 || true; [[ -s $t/cloud.log ]] && break; sleep 0.1; done; : > "$t/cloud.log"
+# a stand-in secret-tool (Secret Service): logs its argv, keeps the secret in a file; ST_FAIL=1 = no keyring
+cat > "$t/stbin/secret-tool" <<'SH'
+#!/bin/sh
+echo "$*" >> "$ST_LOG"
+[ -n "$ST_FAIL" ] && exit 1
+case $1 in store) cat > "$ST_SECRET" ;; lookup) [ -s "$ST_SECRET" ] && cat "$ST_SECRET" || exit 1 ;; clear) rm -f "$ST_SECRET" ;; esac
+SH
+chmod +x "$t/stbin/secret-tool"
+KEY=xai-FAKE0123456789abcdefTESTONLY0123456789
+D6=(GRAPHITE_AGENT_SHARE="$PWD/graphite/agent" GRAPHITE_AGENT_LLM="http://127.0.0.1:$port" GRAPHITE_AGENT_NO_START=1 HOME="$H6"
+    GRAPHITE_AGENT_SOCK="$t/run6/agent.sock" GRAPHITE_AGENT_DATA="$H6/data" PATH="$t/stbin:$PWD/graphite/bin:$PATH" GRAPHITE_PATH="$PWD/graphite"
+    HYPRLAND_INSTANCE_SIGNATURE="" ST_LOG="$t/st.log" ST_SECRET="$t/st.secret" GRAPHITE_AGENT_CLOUD_URL="https://127.0.0.1:$cport/v1" SSL_CERT_FILE="$t/tls/cert.pem")
+c6() { env "${D6[@]}" python3 "$A" "$@"; }
+a6() { : > "$t/req.log"; : > "$t/cloud.log"; env "${D6[@]}" "${E6[@]}" python3 "$A" ask --jsonl "$1" 2>&1 | tee -a "$t/all6.out" || true; }
+E6=(); cs() { c6 cloud status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(str(d[k]) for k in sys.argv[1:]))' "$@"; }
+c6 history >/dev/null; env "${D6[@]}" graphite-settings init
+[[ $(cs enabled key model cap) == "False none grok-4.7 50" ]] && ok "grok: off by default, no key, model grok-4.7, 50 requests/day" || bad "grok defaults: $(cs enabled key model cap)"
+out=$(a6 version); [[ ! -s $t/cloud.log ]] && ! grep -q '"type": "backend"' <<<"$out" && grep -q '"name": "os_release", "ok": true' <<<"$out" && ok "grok off: nothing goes to the cloud, no cloud indicator" || bad "off: $out"
+out=$(c6 cloud on 2>&1 || true); grep -q 'Add your xAI API key first' <<<"$out" && [[ $(cs enabled) == False ]] && ok "grok: can't be switched on without a key" || bad "on without key: $out"
+out=$(echo "short key" | c6 cloud key 2>&1 || true); grep -q 'Not saved' <<<"$out" && ok "grok: a malformed key is refused" || bad "bad key: $out"
+out=$(echo "$KEY" | c6 cloud key); [[ $out == "Saved in your keyring." && $(cs key) == keyring && ! -e $H6/.config/graphite-agent/xai-api-key ]] \
+  && grep -q '^store --label=Graphite Agent: xAI API key service graphite-agent account xai-api-key$' "$t/st.log" && ! grep -q "$KEY" "$t/st.log" \
+  && ok "grok: key from stdin into the keyring (secret-tool store; the key is never an argument)" || bad "keyring: $out"
+out=$(echo "$KEY" | env "${D6[@]}" ST_FAIL=1 python3 "$A" cloud key); f=$H6/.config/graphite-agent/xai-api-key
+grep -q 'No keyring available' <<<"$out" && [[ $(stat -c %a "$f") == 600 && $(stat -c %a "${f%/*}") == 700 ]] && [[ $(env "${D6[@]}" ST_FAIL=1 python3 "$A" cloud status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])') == file ]] \
+  && ok "grok: no keyring -> a 0600 file in a 0700 dir" || bad "key file: $out"
+chmod 644 "$f"; [[ $(env "${D6[@]}" ST_FAIL=1 python3 "$A" cloud status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])') == none ]] && ok "grok: a key file others can read is ignored" || bad "unsafe key file used"
+rm -f "$f"
+! c6 cloud status --json | grep -q "$KEY" && ! c6 status --json | grep -q "$KEY" && ok "grok: status never shows the key" || bad "status shows the key"
+c6 cloud on >/dev/null; out=$(a6 version); r1=$(head -1 "$t/cloud.log")
+grep -q '"type": "backend", "name": "cloud", "model": "grok-4.7"' <<<"$out" && grep -q '"name": "os_release", "ok": true' <<<"$out" && grep -q '"text": "CLOUD "' <<<"$out" && grep -q 'kernel' <<<"$out" && [[ ! -s $t/req.log ]] \
+  && ok "grok on: the answer comes from the cloud (indicator event), tools still run here" || bad "cloud ask: $out"
+python3 - "$r1" "$KEY" <<'PY' && ok "grok request: HTTPS /v1/chat/completions, Bearer key, model, no notes/config tools, no plan call" || bad "cloud request: $r1"
+import json, sys; r = json.loads(sys.argv[1]); q = r["req"]; names = {t["function"]["name"] for t in q["tools"]}
+assert r["path"] == "/v1/chat/completions" and r["auth"] == "Bearer " + sys.argv[2] and q["model"] == "grok-4.7" and q["stream"] is True
+assert "search_notes" not in names and "read_config" not in names and "change_setting" in names and "response_format" not in q
+assert "Grok in the cloud" in q["messages"][0]["content"]
+PY
+c6 cloud model grok-4.3 >/dev/null; a6 hello >/dev/null; grep -q '"model": "grok-4.3"' "$t/cloud.log" && ok "grok: the model name is configurable" || bad "model name"; c6 cloud model grok-4.7 >/dev/null
+out=$(a6 'propose change_setting {"key": "follow_mouse", "value": "2"}')
+grep -q '"type": "action"' <<<"$out" && [[ $(c6 actions --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["state"])') == awaiting_approval && $(env "${D6[@]}" graphite-settings get follow_mouse) == 1 ]] \
+  && ok "grok: a change is still only a proposal on the approval card" || bad "cloud proposal: $out"
+c6 deny "$(c6 actions --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')" >/dev/null
+mkdir -p "$H6/.config/hypr"; echo "bind = SUPER, Q, exec, kitty # MARKERCONFIGLINE" > "$H6/.config/hypr/hyprland.conf"
+out=$(a6 readconf); grep -q '"name": "read_config", "ok": false' <<<"$out" && ! grep -q MARKERCONFIGLINE "$t/cloud.log" && ok "grok: config-file contents are not sent (read_config refused for the cloud)" || bad "read_config to cloud: $out"
+c6 cloud share-files on >/dev/null; a6 readconf >/dev/null; grep -q MARKERCONFIGLINE "$t/cloud.log" && ok "grok: share-files on -> read_config allowed" || bad "share-files"; c6 cloud share-files off >/dev/null
+c6 remember "my printer is a Brother HL-L2350" >/dev/null
+out=$(a6 "which printer do I have"); [[ ! -s $t/cloud.log ]] && grep -q 'matches your notes, which stay on this computer' <<<"$out" && grep -q 'Brother' "$t/req.log" \
+  && ok "grok: a question that uses your notes stays local (notes never sent)" || bad "notes to cloud: $out"
+c6 cloud share-notes on >/dev/null; a6 "which printer do I have" >/dev/null; grep -q 'Brother' "$t/cloud.log" && ok "grok: share-notes on -> notes may go to the cloud" || bad "share-notes"; c6 cloud share-notes off >/dev/null; c6 forget --all >/dev/null
+fb() { grep -q "\"type\": \"backend\", \"name\": \"local\", \"reason\": \"$1" <<<"$2" && grep -q 'ANSWER' <<<"$2" && grep -q '"type": "done"' <<<"$2"; }
+echo 401 > "$t/cloud.mode"; out=$(a6 hello); fb "xAI refused the API key (HTTP 401)" "$out" && ! grep -q 'Incorrect API key' <<<"$out" && ok "grok fallback: HTTP 401 -> local answer (reason shown, no response body)" || bad "401: $out"
+echo 500 > "$t/cloud.mode"; out=$(a6 hello); fb "xAI answered HTTP 500" "$out" && ok "grok fallback: HTTP 500 -> local" || bad "500: $out"
+echo drop > "$t/cloud.mode"; out=$(a6 hello); fb "the cloud connection dropped" "$out" && grep -q 'CLOUD half' <<<"$out" && ok "grok fallback: connection lost mid-answer -> local finishes it" || bad "drop: $out"
+rm -f "$t/cloud.mode"
+E6=(GRAPHITE_AGENT_CLOUD_URL="https://127.0.0.1:1/v1"); out=$(a6 hello); fb "couldn't reach the cloud" "$out" && ok "grok fallback: offline / unreachable -> local" || bad "unreachable: $out"
+E6=(SSL_CERT_FILE=/dev/null); out=$(a6 hello); fb "the cloud's TLS certificate didn't verify" "$out" && [[ ! -s $t/cloud.log ]] && ok "grok: the TLS certificate is checked (untrusted -> local, key not sent)" || bad "tls: $out"
+E6=(GRAPHITE_AGENT_CLOUD_URL="http://example.org/v1"); out=$(a6 hello); fb "the cloud address must be https" "$out" && ok "grok: plain http (except localhost) is refused" || bad "http: $out"
+E6=()
+c6 cloud cap 1 >/dev/null; env "${D6[@]}" python3 - "$t" <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import ga
+s = ga.Store(); s.set_pref("cloud_used", "0")
+PY
+out=$(a6 version); [[ $(grep -c '"path"' "$t/cloud.log") == 1 ]] && fb "today's cloud request limit is reached" "$out" && ok "grok: daily cap: after N cloud requests the rest goes local" || bad "cap: $out"
+out=$(a6 hello); [[ ! -s $t/cloud.log ]] && fb "today's cloud request limit is reached" "$out" && [[ $(cs used_today) == 1 ]] || bad "cap 2: $out"
+env "${D6[@]}" python3 - "$t" <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import ga
+ga.Store().set_pref("cloud_day", "2000-01-01")
+PY
+out=$(a6 hello); grep -q '"name": "cloud"' <<<"$out" && [[ -s $t/cloud.log ]] && ok "grok: the cap resets the next day" || bad "cap reset: $out"
+c6 cloud cap 50 >/dev/null
+env "${D6[@]}" python3 "$A" daemon & d6=$!; for _ in $(seq 50); do [[ -S $t/run6/agent.sock ]] && break; sleep 0.1; done
+(exec env "${D6[@]}" python3 "$A" ask --jsonl slow7 > "$t/slow7") & s7=$!; sleep 1.2
+! grep -qa "$KEY" /proc/[0-9]*/cmdline 2>/dev/null && ok "grok: the key is in no process's command line" || bad "key in argv"
+c6 cancel; wait "$s7" 2>/dev/null || true
+grep -q '"type": "cancelled"' "$t/slow7" && ! grep -q 'c99 ' "$t/slow7" && ok "grok: Stop cancels a cloud answer (through the daemon)" || bad "cloud cancel: $(tail -2 "$t/slow7")"
+kill "$d6" 2>/dev/null; wait "$d6" 2>/dev/null || true
+[[ $(c6 history --json | python3 -c 'import json,sys; h=json.load(sys.stdin); print(sum(1 for x in h if x["cloud"]))') -ge 5 ]] && c6 audit --json | grep -q '"kind": "backend", "name": "cloud", "model": "grok-4.7"' \
+  && ok "grok: history and audit record which answers went to the cloud" || bad "cloud audit"
+! grep -rqa "$KEY" "$H6/data" "$t/all6.out" "$t/req.log" && ! c6 audit --json | grep -q "$KEY" && ok "grok: the key is never in the db, WAL, audit log or output" || bad "key leaked"
+out=$(c6 cloud forget-key); [[ $(cs key enabled) == "none False" && ! -e $t/st.secret ]] && grep -q '^clear service graphite-agent account xai-api-key$' "$t/st.log" && ok "grok: forget-key removes the key (keyring and file) and turns the tier off" || bad "forget-key: $out"
+kill "$cmock" 2>/dev/null || true
+Q=graphite/agent/quickshell/shell.qml
+grep -q 'echoMode: TextInput.Password' "$Q" && grep -q 'command: \["graphite-agent", "cloud", "key"\]; stdinEnabled: true' "$Q" && grep -q 'Sent to Grok in the cloud' "$Q" && grep -q 'Grok: on' "$Q" \
+  && ok "panel: Grok tab (password field -> stdin), on/off toggle, cloud indicator" || bad "panel grok"
+grep -A1 '^depends=' graphite/pkgs/graphite-agent/PKGBUILD | grep -q 'libsecret' && ok "graphite-agent depends on libsecret (secret-tool)" || bad "libsecret depend"
 exit $fail
