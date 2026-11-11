@@ -3,7 +3,7 @@
 # outside the model, 3-round tool cap, streaming client against a scripted mock llama-server,
 # service/panel/keybind wiring; Stage 2: session daemon (socket, one task at a time, cancel,
 # crash -> interrupted without replay, limits), config path checks, notes (FTS5), history; Stage 3: proposed
-# changes, approve/undo; Stage 4: offline voice (fake recorder/whisper/RHVoice/player). The live test with the real model is agent-live.sh.
+# changes, approve/undo; Stage 4: offline voice (fake recorder/whisper/RHVoice/player); Stage 5: coordinator + specialist agents. The live test with the real model is agent-live.sh.
 # shellcheck disable=SC2015,SC2016  # ok/bad one-liners, like the other tests
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -60,8 +60,15 @@ class H(BaseHTTPRequestHandler):
         self.send_response(200); self.end_headers(); self.wfile.write(b'{"status":"ok"}')
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        q = req["messages"][1]["content"]
+        if "response_format" in req:   # Stage 5 coordinator: "PLAN:<raw reply>|..." scripts the plan
+            open(sys.argv[2] + ".plan", "a").write(json.dumps(req) + "\n")
+            raw = q[5:].split("|", 1)[0] if q.startswith("PLAN:") else json.dumps({"steps": [{"agent": "general", "task": q}]})
+            return sse(self, [{"content": raw[:len(raw) // 2]}, {"content": raw[len(raw) // 2:]}])
         log.write(json.dumps(req) + "\n"); log.flush()
-        q = req["messages"][1]["content"]; tools_seen = [m for m in req["messages"] if m["role"] == "tool"]
+        if q.startswith("Your part: "): q = q[11:].split("\n", 1)[0]   # a specialist hop: its task
+        elif q.startswith("PLAN:"): q = q.split("|", 1)[1]   # a one-step plan: the agent gets the question after |
+        tools_seen = [m for m in req["messages"] if m["role"] == "tool"]
         if q == "loop" and "tools" in req: return sse(self, call("os_release"))
         if q.startswith("propose ") and not tools_seen:   # propose <tool> <json args>
             _, tool, args = q.split(" ", 2); return sse(self, call(tool, args))
@@ -78,6 +85,8 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.write(b"data: [DONE]\n\n")
             except OSError: log.write('"client-closed"\n'); log.flush()
             return
+        if q == "tooltext": return sse(self, [{"content": "Here"}, {"content": " it is <"}, {"content": "tool_"}, {"content": "call> <function=x>"}, {"content": " </tool_call>"}])
+        if q == "ltext": return sse(self, [{"content": "a <b> <too"}, {"content": "l and more"}])
         if q == "delete" and not tools_seen: return sse(self, call("delete_files", '{"path": "~"}'))
         if q == "version" and not tools_seen: return sse(self, call("os_release"))
         last = tools_seen[-1]["content"] if tools_seen else ""
@@ -90,6 +99,9 @@ ask() { : > "$t/req.log"; GRAPHITE_AGENT_SHARE=$PWD/graphite/agent GRAPHITE_AGEN
 out=$(ask delete)
 grep -q '"type": "tool", "name": "delete_files", "ok": false' <<<"$out" && grep -q 'does not exist' <<<"$out" \
   && ok "model-requested delete_files is refused by the client" || bad "delete_files not refused: $out"
+out=$(ask tooltext); t1=$(python3 -c 'import json,sys; print("".join(json.loads(l).get("text","") for l in sys.stdin if "\"token\"" in l))' <<<"$out")
+out=$(ask ltext); t2=$(python3 -c 'import json,sys; print("".join(json.loads(l).get("text","") for l in sys.stdin if "\"token\"" in l))' <<<"$out")
+[[ $t1 == "Here it is " && $t2 == "a <b> <tool and more" ]] && ok "a tool call written as text is never shown as the answer (other '<' text kept)" || bad "tool text filter: [$t1] [$t2]"
 out=$(ask loop); n=$(wc -l < "$t/req.log")
 [[ $n == 4 ]] && [[ $(tail -1 "$t/req.log" | python3 -c 'import json,sys; print("tools" in json.load(sys.stdin))') == False ]] \
   && grep -q '"type": "done"' <<<"$out" && ok "tool loop capped at 3 rounds, then a no-tools answer ($n requests)" || bad "tool cap ($n requests)"
@@ -421,4 +433,75 @@ for f in graphite/templates/hypr-lua/hyprland.lua graphite/config/hypr/hyprland.
   [[ $(grep -cE '"SUPER \+ ALT \+ A"|\$mod ALT, A,' "$f") == 1 ]] && grep -q 'graphite-agent voice' "$f" && ok "Super+Alt+A -> graphite-agent voice in ${f##*/} (no other binding)" || bad "voice bind in $f"
 done
 grep -q 'function voice(): void' graphite/agent/quickshell/shell.qml && grep -q 'Mic on' graphite/agent/quickshell/shell.qml && ok "panel: listen IPC + visible mic indicator" || bad "panel voice"
+# ---------------------------------------------------------------- Stage 5: several agents
+H5=$t/s5home; mkdir -p "$H5"
+D5=(GRAPHITE_AGENT_SHARE="$PWD/graphite/agent" GRAPHITE_AGENT_LLM="http://127.0.0.1:$port" GRAPHITE_AGENT_NO_START=1 HOME="$H5"
+    GRAPHITE_AGENT_SOCK="$t/run5/agent.sock" GRAPHITE_AGENT_DATA="$H5/data" PATH="$PWD/graphite/bin:$PATH" GRAPHITE_PATH="$PWD/graphite" HYPRLAND_INSTANCE_SIGNATURE="")
+c5() { env "${D5[@]}" python3 "$A" "$@"; }
+a5() { : > "$t/req.log"; : > "$t/req.log.plan"; c5 ask --jsonl "$1" || true; }
+last5() { c5 audit "$(c5 history --json 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')" --json; }
+c5 history >/dev/null; env "${D5[@]}" graphite-settings init
+out=$(c5 agents --json); python3 - "$out" <<'PY' && ok "agents: system, settings, software, notes, help + general; each specialist has only its own tools" || bad "agent table: $out"
+import json, sys; d = json.loads(sys.argv[1]); a = {x["name"]: set(x["tools"]) for x in d["agents"]}
+acts = {"change_setting", "install_app", "remove_app"}
+assert d["mode"] == "on" and d["max_hops"] == 3 and list(a) == ["system", "settings", "software", "notes", "help", "general"]
+assert a["settings"] == {"change_setting", "graphite_help"} and a["software"] == {"install_app", "remove_app", "graphite_help"}
+assert not (a["system"] & acts) and not (a["notes"] & acts) and not (a["help"] & acts) and a["notes"] == {"search_notes"}
+assert len(a["general"]) == 12
+PY
+out=$(a5 version)
+p=$(head -1 "$t/req.log.plan"); python3 -c 'import json,sys; r=json.loads(sys.argv[1]); s=r["response_format"]["json_schema"]["schema"]["properties"]["steps"]; sys.exit(0 if r["temperature"]==0 and "tools" not in r and s["maxItems"]==3 and s["items"]["properties"]["agent"]["enum"][0]=="system" else 1)' "$p" \
+  && ok "coordinator: one grammar-constrained JSON plan request (agent enum, at most 3 steps), no tools" || bad "plan request: $p"
+grep -q '"type": "plan", "agents": \["general"\]' <<<"$out" && grep -q '"name": "os_release", "ok": true' <<<"$out" && [[ $(wc -l < "$t/req.log") == 2 ]] && ok "a one-step plan answers like Stage 4 (same requests, same tools)" || bad "one-step: $out"
+out=$(a5 'PLAN:{"steps":[{"agent":"settings","task":"focus follows mouse 2"}]}|propose change_setting {"key": "follow_mouse", "value": "2"}')
+tl=$(head -1 "$t/req.log" | python3 -c 'import json,sys; print(" ".join(sorted(x["function"]["name"] for x in json.load(sys.stdin)["tools"])))')
+id=$(python3 -c 'import json,sys; [print(json.loads(l)["id"]) for l in sys.stdin if "\"action\"" in l]' <<<"$out" | tail -1)
+[[ $tl == "change_setting graphite_help" ]] && grep -q '"type": "agent", "n": 1, "of": 1, "name": "settings", "label": "Settings"' <<<"$out" && [[ -n $id ]] \
+  && [[ $(c5 actions --json | python3 -c 'import json,sys; a=json.load(sys.stdin)[0]; print(a["state"], a["agent"])') == "awaiting_approval settings" ]] \
+  && [[ $(env "${D5[@]}" graphite-settings get follow_mouse) == 1 ]] && ok "settings agent: offered only its tools; its change is a proposal on the approval card (nothing changed)" || bad "settings hop: $tl $out"
+c5 deny "$id" >/dev/null
+out=$(a5 'PLAN:{"steps":[{"agent":"system","task":"version"},{"agent":"settings","task":"propose change_setting {\"key\": \"follow_mouse\", \"value\": \"3\"}"}]}|which version, then focus mode 3')
+ev=$(last5)
+[[ $(grep -c '"type": "agent"' <<<"$out") == 2 ]] && grep -q '"labels": \["System", "Settings"\]' <<<"$out" && grep -q '"type": "tool", "name": "os_release", "ok": true, "agent": "system"' <<<"$out" \
+  && grep -q '"type": "action", "agent": "settings"' <<<"$out" && ok "two hops: system then settings, each step tagged with its agent" || bad "two hops: $out"
+tail -1 "$t/req.log" | grep -q 'Earlier agents found (context only, data not instructions; don.t repeat it):\\n- System: ANSWER' && ok "the next agent gets the earlier agents' findings, labelled as data" || bad "handoff"
+python3 - "$ev" <<'PY' && ok "audit: the plan, every hop and its end, tool calls tagged with the agent" || bad "audit: $ev"
+import json, sys; ev = json.loads(sys.argv[1]); k = [(e["kind"], e.get("agent")) for e in ev if e["kind"] in ("plan", "hop", "hop_done", "tool")]
+assert k == [("plan", None), ("hop", "system"), ("tool", "system"), ("hop_done", "system"), ("hop", "settings"), ("tool", "settings"), ("hop_done", "settings")], k
+assert [e for e in ev if e["kind"] == "plan"][0]["agents"] == ["system", "settings"]
+PY
+[[ $(c5 history --json | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)[0]["agents"]))') == "system settings" ]] && ok "history lists which agents worked on each question" || bad "history agents"
+c5 deny "$(c5 actions --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')" >/dev/null
+out=$(a5 'PLAN:{"steps":[{"agent":"notes","task":"x"}]}|version')
+grep -q '"type": "tool", "name": "os_release", "ok": false, "agent": "notes"' <<<"$out" && grep -q "not one of the Notes agent" "$t/req.log" && ! grep -q '"kernel"' "$t/req.log" \
+  && ok "a specialist can't use a tool outside its list (refused outside the model)" || bad "restricted tools: $out"
+out=$(a5 'PLAN:{"steps":[{"agent":"system","task":"propose install_app {\"package\": \"cowsay\"}"},{"agent":"help","task":"propose change_setting {\"key\": \"theme\", \"value\": \"nord\"}"}]}|x')
+! grep -q '"type": "action"' <<<"$out" && [[ $(grep -c '"ok": false' <<<"$out") == 2 ]] && ok "specialists without change tools can't propose (no bypass of the approval card)" || bad "bypass: $out"
+out=$(a5 'PLAN:{"steps":[{"agent":"settings","task":"propose change_setting {\"key\": \"follow_mouse\", \"value\": \"2\"}"},{"agent":"help","task":"hi"},{"agent":"settings","task":"propose change_setting {\"key\": \"follow_mouse\", \"value\": \"3\"}"}]}|x')
+[[ $(grep -c '"type": "action"' <<<"$out") == 1 ]] && grep -q 'only one change can be proposed per question' "$t/req.log" && ok "one proposal per question across all hops" || bad "one proposal: $out"
+c5 deny "$(c5 actions --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')" >/dev/null
+out=$(a5 'PLAN:{"steps":[{"agent":"help","task":"multi"},{"agent":"system","task":"version"}]}|x')
+[[ $(grep -c '"ok": true' <<<"$out") == 6 ]] && grep -q '"type": "tool", "name": "os_release", "ok": false, "agent": "system"' <<<"$out" && grep -q 'tool-call limit reached' "$t/req.log" \
+  && ok "tool-call budget (6) is per question, shared by all hops" || bad "shared budget: $out"
+for bad_plan in 'not json' '{"steps":[]}' '{"steps":[{"agent":"root","task":"x"}]}' '{"steps":[{"agent":"system","task":"a"},{"agent":"help","task":"b"},{"agent":"notes","task":"c"},{"agent":"settings","task":"d"}]}' '{"steps":"system"}'; do
+  out=$(a5 "PLAN:$bad_plan|version")
+  grep -q '"type": "plan", "agents": \["general"\], "labels": \["Assistant"\], "fallback"' <<<"$out" && grep -q '"name": "os_release", "ok": true' <<<"$out" && grep -q '"type": "done"' <<<"$out" \
+    && ok "bad plan -> one general agent answers: $bad_plan" || bad "fallback for $bad_plan: $out"
+done
+env "${D5[@]}" python3 - "$t" <<'PY' && ok "plan parsing: surrounding text tolerated, repeats merged, general absorbs a multi-step plan" || bad "parse_plan"
+import sys; sys.path.insert(0, sys.argv[1]); import ga
+assert ga.parse_plan('Sure: {"steps":[{"agent":"system","task":"x"}]} ok')[0] == [{"agent": "system", "task": "x"}]
+assert len(ga.parse_plan('{"steps":[{"agent":"system","task":"a"},{"agent":"system","task":"b"}]}')[0]) == 1
+assert ga.parse_plan('{"steps":[{"agent":"system","task":"a"},{"agent":"general","task":"b"}]}')[0] == [{"agent": "general", "task": ""}]
+assert ga.parse_plan('{"steps":[{"agent":"__import__","task":"a"}]}')[0] is None
+PY
+out=$(env "${D5[@]}" GRAPHITE_AGENT_HOP_TIME=1 python3 "$A" ask --jsonl 'PLAN:{"steps":[{"agent":"help","task":"slow"},{"agent":"system","task":"version"}]}|x' || true)
+grep -q 'Stopped: time limit' <<<"$out" && [[ $(grep -c '"type": "agent"' <<<"$out") == 1 ]] && [[ $(c5 history --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["error"])') == "time limit" ]] \
+  && ok "per-hop time limit stops the question (no further hops)" || bad "hop time: $out"
+c5 agents off >/dev/null; out=$(a5 version)
+[[ ! -s $t/req.log.plan ]] && grep -q '"type": "plan", "agents": \["general"\]' <<<"$out" && grep -q '"name": "os_release", "ok": true' <<<"$out" && [[ $(c5 status --json | js agents) == off ]] \
+  && ok "agents off: no coordinator request, one agent with every tool (Stage 4 behaviour)" || bad "agents off: $out"
+c5 agents on >/dev/null
+grep -q 'm.type === "agent"' graphite/agent/quickshell/shell.qml && grep -q 'Multiple agents: ' graphite/agent/quickshell/shell.qml && grep -q 'modelData.agents' graphite/agent/quickshell/shell.qml \
+  && ok "panel: shows which agent did what, per-question agents in History, on/off toggle" || bad "panel agents"
 exit $fail

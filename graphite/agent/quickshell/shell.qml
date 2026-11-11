@@ -7,6 +7,8 @@
 // Every request goes through the `graphite-agent` CLI, which talks to the session daemon
 // (llama.cpp on 127.0.0.1); this window holds no model, no memory and no tools of its own.
 // Colors.qml is the theme palette.
+// Several agents (Stage 5): the line under the answer shows which specialist did what
+// ("System: ✓ os_release → Settings: ✓ change_setting"); History shows them per question.
 // Window title "Graphite Agent"; IPC target "agent" (ask/stop/state/tab/quit).
 import Quickshell
 import Quickshell.Io
@@ -25,6 +27,8 @@ ShellRoot {
     property var historyList: []
     property string cited: ""
     property var steps: []
+    property string agentNow: ""        // label of the agent working on the current hop
+    property var agentNames: ({"system": "System", "settings": "Settings", "software": "Software", "notes": "Notes", "help": "Help", "general": "Assistant"})
     property var acts: []
     property var pending: acts.filter(a => a.state === "awaiting_approval")
     property bool acting: actP.running
@@ -41,7 +45,7 @@ ShellRoot {
         q = q.trim();
         if (!q.length || ask.running) return;
         root.spoken = !!byVoice; root.shutUp();
-        root.question = q; root.answer = ""; root.note = ""; root.cited = ""; root.steps = [];
+        root.question = q; root.answer = ""; root.note = ""; root.cited = ""; root.steps = []; root.agentNow = "";
         ask.command = ["graphite-agent", "ask", "--jsonl", q];
         ask.running = true;
     }
@@ -70,6 +74,9 @@ ShellRoot {
             let m; try { m = JSON.parse(data); } catch (e) { return; }
             if (m.type === "token") root.answer += m.text;
             else if (m.type === "status") root.note = m.text;
+            else if (m.type === "plan") { if (m.fallback) root.note = "Plan didn't parse: one agent answers"; }
+            else if (m.type === "agent") { root.agentNow = m.label; root.note = m.label + " agent" + (m.of > 1 ? " (" + m.n + "/" + m.of + ")" : "") + "…";
+                root.steps = root.steps.concat([(root.steps.length ? "→ " : "") + m.label + ":"]); }
             else if (m.type === "tool") { root.note = (m.ok ? "Checked " : "Refused tool ") + m.name; root.steps = root.steps.concat([(m.ok ? "✓ " : "✗ ") + m.name]); }
             else if (m.type === "notes") root.cited = m.ids.join(", ");
             else if (m.type === "action") root.refresh();
@@ -198,13 +205,13 @@ ShellRoot {
                         Text { text: root.answer.length ? root.plain(root.answer) : (root.question.length ? (root.busy ? "Thinking…" : "") :
                                      "I can check your Graphite version, disk, memory, network, battery, updates and failed services, read your config files and help with keybinds and settings. Say \"remember …\" to save a note. I can propose a settings change or installing/removing an app; nothing changes until you click Approve, and you can undo it. Speak (Super+Alt+A) to ask out loud; voice stays on this computer and no audio is kept.")
                                color: root.answer.length ? Colors.foreground : Colors.muted; font.pixelSize: 14; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
-                        Text { visible: root.steps.length > 0; text: "Steps: " + root.steps.join("  "); color: Colors.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        Text { visible: root.steps.length > 0; text: "Agents: " + root.steps.join(" "); color: Colors.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
                         Text { visible: root.cited.length > 0; text: "From your notes: " + root.cited; color: Colors.muted; font.pixelSize: 12; Layout.fillWidth: true }
                         Repeater { model: root.pending   // proposed changes: nothing happens until Approve
                             delegate: Rectangle { Layout.fillWidth: true; radius: 8; color: Colors.overlay
                                 border.color: Colors.accent; border.width: 1; implicitHeight: card.implicitHeight + 20
                                 ColumnLayout { id: card; anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10 } spacing: 4
-                                    Text { text: (modelData.kind === "system" ? "System change · " : "Your settings · ") + "a" + modelData.id; color: Colors.muted; font.pixelSize: 11 }
+                                    Text { text: (modelData.kind === "system" ? "System change · " : "Your settings · ") + "a" + modelData.id + (modelData.agent && modelData.agent !== "general" ? " · proposed by the " + (root.agentNames[modelData.agent] || modelData.agent) + " agent" : ""); color: Colors.muted; font.pixelSize: 11 }
                                     Text { text: modelData.summary; color: Colors.foreground; font.pixelSize: 14; font.bold: true; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
                                     Repeater { model: modelData.details
                                         delegate: Text { text: "• " + modelData; color: Colors.muted; font.pixelSize: 12; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true } }
@@ -252,11 +259,14 @@ ShellRoot {
                         delegate: RowLayout { width: hl.width; spacing: 8
                             Text { text: modelData.state; font.pixelSize: 12; Layout.preferredWidth: 80
                                 color: modelData.state === "done" ? Colors.accent : Colors.muted }
-                            Text { text: modelData.question || "(not kept)"; color: Colors.foreground; font.pixelSize: 13; elide: Text.ElideRight; textFormat: Text.PlainText; Layout.fillWidth: true } } } }
+                            Text { text: modelData.question || "(not kept)"; color: Colors.foreground; font.pixelSize: 13; elide: Text.ElideRight; textFormat: Text.PlainText; Layout.fillWidth: true }
+                            Text { text: (modelData.agents || []).map(a => root.agentNames[a] || a).join(" → "); color: Colors.muted; font.pixelSize: 11 } } } }
                 RowLayout { spacing: 8
                     Btn { label: root.st.history === "off" ? "Keep history: off" : "Keep history: on"
                         onClicked: root.run(["graphite-agent", "history", root.st.history === "off" ? "on" : "off"]) }
-                    Btn { label: "Clear history"; onClicked: root.run(["graphite-agent", "history", "clear"]) } }
+                    Btn { label: "Clear history"; onClicked: root.run(["graphite-agent", "history", "clear"]) }
+                    Btn { label: root.st.agents === "off" ? "Multiple agents: off" : "Multiple agents: on"
+                        onClicked: root.run(["graphite-agent", "agents", root.st.agents === "off" ? "on" : "off"]) } }
             }
             }
 
