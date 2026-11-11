@@ -111,6 +111,7 @@ graphite-agent setup-model         repair/fallback: verify the model, else put a
 graphite-agent listen [--jsonl]    record a question (until listen --stop or 30 s), print the text
 graphite-agent say TEXT|-          read text aloud; say --stop
 graphite-agent voice               Super+Alt+A: open the panel and start/stop listening
+graphite-agent agents [on|off]     the specialist agents and their tools; off = one agent
 ```
 The model service starts on demand (opening the panel warms it up) and drops the weights after
 15 idle minutes. Extra llama-server flags go in `~/.config/graphite/agent.env`, e.g.
