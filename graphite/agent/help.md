@@ -1,4 +1,4 @@
-# Graphite help for the agent (graphite-agent, Stage 1)
+# Graphite help for the agent (graphite-agent)
 # "## summary" goes into the system prompt (keep it short: ~4K-token context).
 # The other sections are returned by the graphite_help tool. The keybind list is generated
 # from hyprland.lua at package time (keybinds.txt) and appended to "## keybinds".
@@ -30,7 +30,11 @@ are taken around package changes (snapper); see the recovery guide to roll back.
 
 ## agent
 This assistant runs a small local model (Qwen3.5-2B) with llama.cpp on this computer. It works
-offline and sends nothing anywhere. It can only read the Graphite version, system status and this
-help; it cannot run commands or change anything. Stop ends an answer; Unload (or
-`graphite-agent unload`) stops the model and frees its memory. The model comes with Graphite
-(package graphite-agent-model); `graphite-agent setup-model` checks or repairs it.
+offline and sends nothing anywhere. It can read the Graphite version, system status, network,
+battery, recent updates, failed services, config files under ~/.config and this help; it cannot
+run commands or change anything. Notes: say "remember ..." (or use the Notes tab, or
+`graphite-agent remember "..."`) and it keeps that note on this computer and may use it in
+answers; `graphite-agent notes`, `forget ID|--all` and `export FILE` show, delete and export them.
+History keeps your questions for 30 days (`graphite-agent history off|clear`). Stop ends an
+answer; Unload (or `graphite-agent unload`) stops the model and frees its memory. The model comes
+with Graphite (package graphite-agent-model); `graphite-agent setup-model` checks or repairs it.

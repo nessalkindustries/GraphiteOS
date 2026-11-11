@@ -1,9 +1,11 @@
 // graphite-agent: managed copy (graphite-agent toggle refreshes this file from
 // /usr/share/graphite-agent/quickshell; delete this line to keep your own edits).
-// Graphite Agent panel (Stage 1, Super+Shift+A): read-only local assistant.
-// Every question goes through `graphite-agent ask --jsonl` (llama.cpp on 127.0.0.1); this
-// window holds no model, no memory and no tools of its own. Colors.qml is the theme palette.
-// Window title "Graphite Agent"; IPC target "agent" (ask/stop/state/quit).
+// Graphite Agent panel (Super+Shift+A): local assistant. Tabs: Ask, Notes (what it may remember,
+// with Forget / Export) and History (recent questions and their state).
+// Every request goes through the `graphite-agent` CLI, which talks to the session daemon
+// (llama.cpp on 127.0.0.1); this window holds no model, no memory and no tools of its own.
+// Colors.qml is the theme palette.
+// Window title "Graphite Agent"; IPC target "agent" (ask/stop/state/tab/quit).
 import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -16,11 +18,19 @@ ShellRoot {
     property string question: ""
     property string note: ""
     property bool busy: ask.running
+    property string tab: "ask"
+    property var notesList: []
+    property var historyList: []
+    property string cited: ""
+    property var steps: []
+
+    function refresh() { if (!notesP.running) notesP.running = true; if (!histP.running) histP.running = true; }
+    function run(cmd) { act.command = cmd; act.running = true; }
 
     function send(q) {
         q = q.trim();
         if (!q.length || ask.running) return;
-        root.question = q; root.answer = ""; root.note = "";
+        root.question = q; root.answer = ""; root.note = ""; root.cited = ""; root.steps = [];
         ask.command = ["graphite-agent", "ask", "--jsonl", q];
         ask.running = true;
     }
@@ -40,11 +50,13 @@ ShellRoot {
             let m; try { m = JSON.parse(data); } catch (e) { return; }
             if (m.type === "token") root.answer += m.text;
             else if (m.type === "status") root.note = m.text;
-            else if (m.type === "tool") root.note = (m.ok ? "Checked " : "Refused tool ") + m.name;
+            else if (m.type === "tool") { root.note = (m.ok ? "Checked " : "Refused tool ") + m.name; root.steps = root.steps.concat([(m.ok ? "✓ " : "✗ ") + m.name]); }
+            else if (m.type === "notes") root.cited = m.ids.join(", ");
+            else if (m.type === "cancelled") root.note = "Stopped.";
             else if (m.type === "error") root.note = m.text;
             else if (m.type === "done" && root.note.startsWith("Checked")) root.note = "";
         } }
-        onExited: (code) => { if (code !== 0 && !root.note.length) root.note = "The agent stopped (exit " + code + ")."; statusP.running = true; }
+        onExited: (code) => { if (code !== 0 && code !== 130 && !root.note.length) root.note = "The agent stopped (exit " + code + ")."; statusP.running = true; root.refresh(); }
     }
     Process { id: cancelP; command: ["graphite-agent", "cancel"] }
     Process { id: unloadP; command: ["graphite-agent", "unload"]; onExited: { root.note = "Model unloaded; memory freed."; statusP.running = true; } }
@@ -52,6 +64,14 @@ ShellRoot {
         onExited: statusP.running = true }
     Process { id: statusP; command: ["graphite-agent", "status", "--json"]; running: true
         stdout: StdioCollector { onStreamFinished: { try { root.st = JSON.parse(this.text); } catch (e) {} } } }
+    Process { id: notesP; command: ["graphite-agent", "notes", "--json"]; running: true
+        stdout: StdioCollector { onStreamFinished: { try { root.notesList = JSON.parse(this.text); } catch (e) {} } } }
+    Process { id: histP; command: ["graphite-agent", "history", "--json", "15"]; running: true
+        stdout: StdioCollector { onStreamFinished: { try { root.historyList = JSON.parse(this.text); } catch (e) {} } } }
+    Process { id: act   // one short CLI action (remember / forget / export / history on|off|clear)
+        stdout: StdioCollector { onStreamFinished: { if (this.text.trim().length) root.note = this.text.trim().split("\n").pop(); } }
+        stderr: StdioCollector { onStreamFinished: { if (this.text.trim().length) root.note = this.text.trim(); } }
+        onExited: { root.refresh(); statusP.running = true; } }
     Timer { interval: 3000; repeat: true; running: true; onTriggered: if (!statusP.running) statusP.running = true }
 
     IpcHandler {
@@ -59,6 +79,7 @@ ShellRoot {
         function ask(q: string): void { root.send(q); }
         function stop(): void { root.stop(); }
         function state(): string { return root.busy ? "busy" : (root.st.server || "unknown"); }
+        function tab(t: string): void { if (["ask", "notes", "history"].indexOf(t) >= 0) { root.tab = t; root.refresh(); } }
         function quit(): void { Qt.quit(); }
     }
 
@@ -77,7 +98,7 @@ ShellRoot {
     FloatingWindow {
         id: win
         title: "Graphite Agent"
-        implicitWidth: 560; implicitHeight: 480
+        implicitWidth: 600; implicitHeight: 540
         color: Colors.background
         onClosed: { root.stop(); Qt.quit(); }
 
@@ -98,6 +119,17 @@ ShellRoot {
                 }
             }
 
+            RowLayout { Layout.fillWidth: true; spacing: 6
+                Btn { label: "Ask"; on: root.tab === "ask"; onClicked: root.tab = "ask" }
+                Btn { label: "Notes (" + root.notesList.length + ")"; on: root.tab === "notes"; onClicked: { root.tab = "notes"; root.refresh(); } }
+                Btn { label: "History"; on: root.tab === "history"; onClicked: { root.tab = "history"; root.refresh(); } }
+                Item { Layout.fillWidth: true }
+            }
+
+            StackLayout { Layout.fillWidth: true; Layout.fillHeight: true
+                currentIndex: root.tab === "ask" ? 0 : (root.tab === "notes" ? 1 : 2)
+
+            ColumnLayout { spacing: 12   // Ask
             Rectangle { Layout.fillWidth: true; implicitHeight: 38; radius: 8; color: Colors.surface; border.color: Colors.overlay; border.width: 1
                 TextInput { id: q; anchors { fill: parent; leftMargin: 12; rightMargin: 12 } verticalAlignment: TextInput.AlignVCenter
                     color: Colors.foreground; font.pixelSize: 14; clip: true; focus: true
@@ -112,9 +144,48 @@ ShellRoot {
                     ColumnLayout { id: col; width: fl.width; spacing: 8
                         Text { visible: root.question.length > 0; text: root.question; color: Colors.muted; font.pixelSize: 13; wrapMode: Text.Wrap; Layout.fillWidth: true }
                         Text { text: root.answer.length ? root.plain(root.answer) : (root.question.length ? (root.busy ? "Thinking…" : "") :
-                                     "I can tell you your Graphite version, free disk space, memory and uptime, and help with keybinds and settings. I can't change anything on this computer.")
+                                     "I can check your Graphite version, disk, memory, network, battery, updates and failed services, read your config files and help with keybinds and settings. Say \"remember …\" to save a note. I can't change anything on this computer.")
                                color: root.answer.length ? Colors.foreground : Colors.muted; font.pixelSize: 14; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+                        Text { visible: root.steps.length > 0; text: "Steps: " + root.steps.join("  "); color: Colors.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        Text { visible: root.cited.length > 0; text: "From your notes: " + root.cited; color: Colors.muted; font.pixelSize: 12; Layout.fillWidth: true }
                     } } }
+            }
+
+            ColumnLayout { spacing: 8   // Notes: saved only when you ask; data, never instructions
+                Rectangle { Layout.fillWidth: true; implicitHeight: 38; radius: 8; color: Colors.surface; border.color: Colors.overlay; border.width: 1
+                    TextInput { id: noteIn; anchors { fill: parent; leftMargin: 12; rightMargin: 12 } verticalAlignment: TextInput.AlignVCenter
+                        color: Colors.foreground; font.pixelSize: 14; clip: true; maximumLength: 500
+                        onAccepted: { if (text.trim().length) root.run(["graphite-agent", "remember", text.trim()]); text = ""; }
+                        Text { visible: !noteIn.text.length; anchors.verticalCenter: parent.verticalCenter; color: Colors.muted; font.pixelSize: 14
+                            text: "Add a note for the assistant (Enter). No passwords." } } }
+                Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: Colors.surface; clip: true
+                    Text { visible: root.notesList.length === 0; anchors.centerIn: parent; color: Colors.muted; font.pixelSize: 13
+                        text: "No notes. Notes stay on this computer." }
+                    ListView { id: nl; anchors { fill: parent; margins: 10 } clip: true; spacing: 6; model: root.notesList
+                        delegate: RowLayout { width: nl.width; spacing: 8
+                            Text { text: "n" + modelData.id; color: Colors.muted; font.pixelSize: 12 }
+                            Text { text: modelData.text; color: Colors.foreground; font.pixelSize: 13; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+                            Btn { label: "Forget"; implicitHeight: 26; onClicked: root.run(["graphite-agent", "forget", String(modelData.id)]) } } } }
+                RowLayout { spacing: 8
+                    Btn { label: "Export…"; onClicked: root.run(["graphite-agent", "export", "~/graphite-agent-export.json"]) }
+                    Btn { label: "Forget all"; visible: root.notesList.length > 0; onClicked: root.run(["graphite-agent", "forget", "--all"]) } }
+            }
+
+            ColumnLayout { spacing: 8   // History: tasks and their final state (30 days)
+                Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: Colors.surface; clip: true
+                    Text { visible: root.historyList.length === 0; anchors.centerIn: parent; color: Colors.muted; font.pixelSize: 13
+                        text: root.st.history === "off" ? "History is off." : "No questions yet." }
+                    ListView { id: hl; anchors { fill: parent; margins: 10 } clip: true; spacing: 6; model: root.historyList
+                        delegate: RowLayout { width: hl.width; spacing: 8
+                            Text { text: modelData.state; font.pixelSize: 12; Layout.preferredWidth: 80
+                                color: modelData.state === "done" ? Colors.accent : Colors.muted }
+                            Text { text: modelData.question || "(not kept)"; color: Colors.foreground; font.pixelSize: 13; elide: Text.ElideRight; textFormat: Text.PlainText; Layout.fillWidth: true } } } }
+                RowLayout { spacing: 8
+                    Btn { label: root.st.history === "off" ? "Keep history: off" : "Keep history: on"
+                        onClicked: root.run(["graphite-agent", "history", root.st.history === "off" ? "on" : "off"]) }
+                    Btn { label: "Clear history"; onClicked: root.run(["graphite-agent", "history", "clear"]) } }
+            }
+            }
 
             RowLayout { Layout.fillWidth: true; spacing: 8
                 Btn { label: root.busy ? "Stop" : "Ask"; on: root.busy; onClicked: root.busy ? root.stop() : (root.send(q.text), q.text = "") }
