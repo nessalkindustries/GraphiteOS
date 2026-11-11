@@ -45,7 +45,10 @@ if [ "$CONTAINER" = 1 ]; then
   sudo mkdir -p "$PKGCACHE"
   GNUPGMNT=""; [ -n "$GRAPHITE_SIGN_KEY" ] && GNUPGMNT="-v ${GNUPGHOME:-$HOME/.gnupg}:/root/.gnupg"
   # shellcheck disable=SC2086
-  exec sudo "$ENG" run --rm --privileged --network host -v "$PWD":/src -v "$OUT":/src/out $GNUPGMNT \
+  # no pids cap: podman's default (2048 tasks) can run out during mkarchiso's pacstrap; pacman then
+  # cannot spawn gpg and reports "GPGME error: Inappropriate ioctl for device" / "missing required
+  # signature" and deletes good cached packages as corrupted.
+  exec sudo "$ENG" run --rm --pids-limit=-1 --privileged --network host -v "$PWD":/src -v "$OUT":/src/out $GNUPGMNT \
     -e GRAPHITE_COMMIT="$GRAPHITE_COMMIT" -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -e GRAPHITE_SNAPSHOT="$GRAPHITE_SNAPSHOT" -e GRAPHITE_SIGN_KEY="$GRAPHITE_SIGN_KEY" -e GRAPHITE_REPO_URL="$GRAPHITE_REPO_URL" \
     -e GRAPHITE_IMAGE="$GRAPHITE_IMAGE" -e GRAPHITE_ARCHISO="$GRAPHITE_ARCHISO" \
     -v "$PKGCACHE":/var/cache/pacman/pkg "$GRAPHITE_IMAGE" \

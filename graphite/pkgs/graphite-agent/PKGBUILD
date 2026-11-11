@@ -7,21 +7,24 @@
 # RHVoice speech output, audio only in RAM; Super+Alt+A push-to-talk. Stage 5: a coordinator hands
 # sub-tasks to specialist agents (system, settings, software, notes, help) with restricted tools,
 # one after another on the same local model; `graphite-agent agents off` = one agent.
+# Stage 6: optional Grok tier (off by default): the user's own xAI API key in their keyring
+# (libsecret's secret-tool) or a 0600 file, HTTPS to api.x.ai, local fallback, daily cap.
 # The model is the separate graphite-agent-model package (~1.4 GB, installed by default);
 # `graphite-agent setup-model` is the repair/fallback. graphite-llm.service: user unit, never enabled.
 pkgname=graphite-agent
-pkgver=0.5.0
+pkgver=0.6.0
 pkgrel=1
 pkgdesc="Graphite Agent: offline assistant (llama.cpp, local Qwen model, notes, safe changes, voice)"
 arch=(any)
 url="https://github.com/nessalkindustries/GraphiteOS"
 license=(MIT)
 depends=(python llama-cpp quickshell graphite-config libarchive iproute2 polkit snapper
-         pipewire-audio whisper-cpp rhvoice rhvoice-voice-slt)
+         pipewire-audio whisper-cpp rhvoice rhvoice-voice-slt libsecret)
 # the model: graphite-agent-model (installed by default; setup-model is the fallback)
 optdepends=("graphite-agent-model: the offline model (installed by default)"
             "graphite-agent-voice-model: offline speech recognition (installed by default)"
-            "kitty: setup-model window from the panel")
+            "kitty: setup-model window from the panel"
+            "gnome-keyring: a Secret Service keyring for the optional Grok API key (else a 0600 file)")
 
 package() {
   local src=${GRAPHITE_SRC:-$startdir/../..}

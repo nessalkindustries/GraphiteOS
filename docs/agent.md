@@ -2,7 +2,7 @@
 
 An offline assistant: **Super+Shift+A** (or `graphite-agent toggle`) opens a Quickshell
 panel; questions go to a local Qwen3.5-2B (Q4_K_M) model run by llama.cpp on `127.0.0.1:8081`.
-Nothing leaves the computer. Installed by default: both packages are `graphite-desktop` dependencies.
+Nothing leaves the computer unless you turn on the optional Grok tier (Stage 6). Installed by default: both packages are `graphite-desktop` dependencies.
 
 | Package | Contents |
 |---|---|
@@ -17,7 +17,7 @@ home in GiB, uptime, load), `graphite_help` (bundled help: keybinds, apps, setti
 `battery_status`, `recent_updates` (pacman.log), `failed_services` (system + user),
 `read_config` (files under `~/.config/{hypr,graphite,kitty,quickshell,mako,waybar,gtk-3.0,gtk-4.0}`
 and a few `/etc` files; symlinks resolved first, secret-looking lines redacted) and
-`search_notes`. Unknown tools or arguments are refused. No shell, no file edits by the model, no cloud.
+`search_notes`. Unknown tools or arguments are refused. No shell, no file edits by the model.
 
 ## Session daemon (Stage 2)
 `graphite-agent.socket` (enabled for every user by the package) listens on
@@ -112,6 +112,8 @@ graphite-agent listen [--jsonl]    record a question (until listen --stop or 30 
 graphite-agent say TEXT|-          read text aloud; say --stop
 graphite-agent voice               Super+Alt+A: open the panel and start/stop listening
 graphite-agent agents [on|off]     the specialist agents and their tools; off = one agent
+graphite-agent cloud [status|on|off|key|forget-key|model NAME|cap N|share-notes on|off|share-files on|off]
+                                   the optional Grok tier (key from stdin only)
 ```
 The model service starts on demand (opening the panel warms it up) and drops the weights after
 15 idle minutes. Extra llama-server flags go in `~/.config/graphite/agent.env`, e.g.
@@ -154,6 +156,40 @@ couldn't answer the RAM part). Cost: one extra short model call per question, ab
 (simple questions 5-11 s instead of 4-6 s; two-agent questions 11-20 s). A 2B model still
 sometimes repeats itself in a second hop.
 
+## Optional Grok tier (Stage 6)
+**Off by default**; nothing changes for anyone who doesn't turn it on. The panel's **Grok** tab
+(or `graphite-agent cloud ...`) takes the user's **own** xAI API key and an on/off switch.
+
+- **Key**: pasted into a password field and handed to `graphite-agent cloud key` on **stdin**
+  (never a command-line argument). Stored in the user's keyring through Secret Service
+  (`secret-tool`, libsecret; e.g. gnome-keyring or KeePassXC) under
+  `service=graphite-agent account=xai-api-key`; without a keyring daemon (the default Graphite
+  install has none) in `~/.config/graphite-agent/xai-api-key`, 0600 in a 0700 dir (a key file
+  others can read is ignored). Never printed, logged, put in the db/audit or in argv; status
+  shows only *keyring* / *file* / *none*. `cloud forget-key` removes it and turns the tier off.
+- **Requests**: HTTPS (certificate verified) to `https://api.x.ai/v1/chat/completions`, the
+  OpenAI-compatible endpoint, streamed, `Authorization: Bearer` header. Model `grok-4.7` by
+  default (`cloud model NAME`). Same tools (validated and run on this computer) and the same
+  approval cards + undo; one agent with every tool (no coordinator call: Grok handles the
+  full tool list, and it saves a request).
+- **What is sent**: the question, the assistant's instructions and tool schemas, and the results
+  of the system tools the model calls (version, RAM/disk, network interfaces and Wi-Fi name,
+  battery, updates, failed services). **Not sent** unless the user opts in: notes
+  (`cloud share-notes on`; a question that matches a note stays local) and config-file
+  contents (`read_config` is not offered or allowed: `cloud share-files on`). History is never
+  sent; each question stands alone.
+- **Indicator**: an amber **☁ Grok · cloud · MODEL** pill and a "Sent to Grok in the cloud" line
+  on the answer; ☁ next to cloud answers in History; `backend` events in the audit log; the CLI
+  prints `[Sent to Grok in the cloud (MODEL)]` on stderr.
+- **Fallback**: no key, plain http (except localhost, for tests), a failed TLS check, offline,
+  a timeout (60 s without data), any HTTP error (401 bad key, 429 no credits, 5xx) or a stream
+  that ends early -> the local model answers the rest of that question, and the panel says why.
+  Only a status code is reported, never a response body.
+- **Daily cap**: 50 cloud requests per day by default (`cloud cap N`; a question uses 1-4: one
+  per model round). After that, local until midnight.
+
+Tested only against a local HTTPS mock (`tests/agent-check.sh`): no real API calls, no real key.
+
 ## ISO and installer
 `graphite-agent-voice-model` (59.7 MB, whisper base.en q5_1) is handled exactly like the LLM
 package below: in `/usr/share/graphite-agent/models` (NoExtract on the live ISO), copied to the
@@ -174,10 +210,12 @@ place: no cache copy), so the target stores the model once. `install.sh`'s
 ## Tests
 `tests/agent-check.sh`: offline checks against a scripted mock llama-server (tool allowlist,
 argument validation, a forced `delete_files` call, the 3-round cap, serve flags, model pins,
-cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget; Stage 3: proposals change nothing, approve/undo/deny/expiry, undo conflict refusal, invalid values and protected packages refused, one proposal per question, failed snapshot blocks the change, crash -> interrupted, helper as root with a stand-in snapper: real pacman install/undo, injection refused; Stage 4 with a fake recorder/whisper/RHVoice/player: listen -> stop -> text, 0600 file in RAM deleted after transcription, transcription in the daemon and refused while an answer runs, silence, the 30 s cap, no orphan recorder after a kill, no paths or symlinks via the socket, say strips markdown and stops at once, voice model pin and ISO wiring, Super+Alt+A; Stage 5: the plan request shape, one-step plans behave like Stage 4, specialists offered and allowed only their tools, a change by the Settings agent is still only a proposal, two hops with the hand-off and audit trail, agents without change tools can't propose, one proposal across hops, the shared call budget, five kinds of bad plan -> one general agent, the per-hop time limit, agents off, the tool-call-as-text filter). `tests/smoke.sh` (VM) checks the package, the bind and
+cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget; Stage 3: proposals change nothing, approve/undo/deny/expiry, undo conflict refusal, invalid values and protected packages refused, one proposal per question, failed snapshot blocks the change, crash -> interrupted, helper as root with a stand-in snapper: real pacman install/undo, injection refused; Stage 4 with a fake recorder/whisper/RHVoice/player: listen -> stop -> text, 0600 file in RAM deleted after transcription, transcription in the daemon and refused while an answer runs, silence, the 30 s cap, no orphan recorder after a kill, no paths or symlinks via the socket, say strips markdown and stops at once, voice model pin and ISO wiring, Super+Alt+A; Stage 5: the plan request shape, one-step plans behave like Stage 4, specialists offered and allowed only their tools, a change by the Settings agent is still only a proposal, two hops with the hand-off and audit trail, agents without change tools can't propose, one proposal across hops, the shared call budget, five kinds of bad plan -> one general agent, the per-hop time limit, agents off, the tool-call-as-text filter; Stage 6 against a local HTTPS mock with a self-signed CA and a stand-in secret-tool: off by default, key only via stdin into the keyring or a 0600 file, request shape (path, Bearer, model, no notes/config tools), proposals unchanged, read_config and notes kept local unless opted in, fallback on 401/500/dropped stream/unreachable/untrusted certificate/plain http, the daily cap and its reset, cancel, the key absent from argv, db, WAL, audit and output, forget-key). `tests/smoke.sh` (VM) checks the package, the bind and
 that graphite-llm is not running at login.
 ![Graphite Agent panel](screenshots/agent-panel.png)
 ![Notes tab](screenshots/agent-notes.png)
 ![A proposed change](screenshots/agent-change.png)
 ![Voice](screenshots/agent-voice.png)
 ![Several agents](screenshots/agent-agents.png)
+![Grok tier: an answer sent to the cloud (local mock)](screenshots/agent-grok-answer.png)
+![Grok tab](screenshots/agent-grok.png)

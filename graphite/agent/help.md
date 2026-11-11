@@ -30,7 +30,7 @@ are taken around package changes (snapper); see the recovery guide to roll back.
 
 ## agent
 This assistant runs a small local model (Qwen3.5-2B) with llama.cpp on this computer. It works
-offline and sends nothing anywhere. It can read the Graphite version, system status, network,
+offline and sends nothing anywhere unless you turn on the optional Grok tier. It can read the Graphite version, system status, network,
 battery, recent updates, failed services, config files under ~/.config and this help. It can
 propose a change: theme, bar, display scale, keyboard layout, pointer settings, or installing or
 removing an app from the Arch repos. Nothing changes until you click Approve on the card; your
@@ -52,3 +52,10 @@ Agents: a coordinator passes each question to one or more specialists (System, S
 Notes, Help), each allowed only its own tools, one after another on the same local model; the
 panel shows which agent did what. Changes still need Approve. `graphite-agent agents off` uses
 a single agent with every tool.
+Grok (optional, off by default): the Grok tab in the panel takes your own xAI API key (kept in
+your keyring, or a file only you can read) and switches answering to xAI's Grok in the cloud,
+billed to your xAI account. An amber "Grok · cloud" pill shows when an answer goes to the
+cloud. Same tools and the same Approve cards; notes and config files stay here unless you allow
+them; questions that match your notes stay local; history is never sent. Errors, no network or
+the daily limit (50 requests) fall back to the local model. `graphite-agent cloud` (status, on,
+off, key, forget-key, model NAME, cap N, share-notes, share-files).

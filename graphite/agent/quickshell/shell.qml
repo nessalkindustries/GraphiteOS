@@ -9,6 +9,9 @@
 // Colors.qml is the theme palette.
 // Several agents (Stage 5): the line under the answer shows which specialist did what
 // ("System: ✓ os_release → Settings: ✓ change_setting"); History shows them per question.
+// Grok tier (Stage 6, off by default): the Grok tab takes your own xAI API key (password field,
+// handed to `graphite-agent cloud key` on stdin, stored in your keyring or a 0600 file) and the
+// on/off switch. While an answer goes to the cloud the header pill turns amber: "Grok · cloud".
 // Window title "Graphite Agent"; IPC target "agent" (ask/stop/state/tab/quit).
 import Quickshell
 import Quickshell.Io
@@ -27,6 +30,10 @@ ShellRoot {
     property var historyList: []
     property string cited: ""
     property var steps: []
+    property string via: ""             // this answer: "cloud" | "local" | "" (Grok tier off)
+    property string viaWhy: ""          // why it stayed / went back local
+    property var cl: st.cloud || ({})
+    readonly property color amber: "#e0a030"   // cloud indicator (same in every theme: "leaves this computer")
     property string agentNow: ""        // label of the agent working on the current hop
     property var agentNames: ({"system": "System", "settings": "Settings", "software": "Software", "notes": "Notes", "help": "Help", "general": "Assistant"})
     property var acts: []
@@ -45,7 +52,7 @@ ShellRoot {
         q = q.trim();
         if (!q.length || ask.running) return;
         root.spoken = !!byVoice; root.shutUp();
-        root.question = q; root.answer = ""; root.note = ""; root.cited = ""; root.steps = []; root.agentNow = "";
+        root.question = q; root.answer = ""; root.note = ""; root.cited = ""; root.steps = []; root.agentNow = ""; root.via = ""; root.viaWhy = "";
         ask.command = ["graphite-agent", "ask", "--jsonl", q];
         ask.running = true;
     }
@@ -74,6 +81,7 @@ ShellRoot {
             let m; try { m = JSON.parse(data); } catch (e) { return; }
             if (m.type === "token") root.answer += m.text;
             else if (m.type === "status") root.note = m.text;
+            else if (m.type === "backend") { root.via = m.name; root.viaWhy = m.reason || ""; if (m.name === "local" && m.reason) root.note = "On this computer: " + m.reason; }
             else if (m.type === "plan") { if (m.fallback) root.note = "Plan didn't parse: one agent answers"; }
             else if (m.type === "agent") { root.agentNow = m.label; root.note = m.label + " agent" + (m.of > 1 ? " (" + m.n + "/" + m.of + ")" : "") + "…";
                 root.steps = root.steps.concat([(root.steps.length ? "→ " : "") + m.label + ":"]); }
@@ -116,6 +124,12 @@ ShellRoot {
             if (m.type === "status" || m.type === "result" || m.type === "error") root.note = m.text;
         } }
         onExited: root.refresh() }
+    Process { id: keyP   // the API key goes to the CLI on stdin, never as an argument
+        command: ["graphite-agent", "cloud", "key"]; stdinEnabled: true
+        onStarted: { write(keyIn.text.trim() + "\n"); keyIn.text = ""; stdinEnabled = false; }
+        stdout: StdioCollector { onStreamFinished: { if (this.text.trim().length) root.note = this.text.trim(); } }
+        stderr: StdioCollector { onStreamFinished: { if (this.text.trim().length) root.note = this.text.trim(); } }
+        onExited: { stdinEnabled = true; statusP.running = true; } }
     Process { id: act   // one short CLI action (remember / forget / export / history on|off|clear)
         stdout: StdioCollector { onStreamFinished: { if (this.text.trim().length) root.note = this.text.trim().split("\n").pop(); } }
         stderr: StdioCollector { onStreamFinished: { if (this.text.trim().length) root.note = this.text.trim(); } }
@@ -128,7 +142,7 @@ ShellRoot {
         function stop(): void { root.stop(); }
         function state(): string { return root.busy ? "busy" : (root.st.server || "unknown"); }
         function voice(): void { root.listen(); }
-        function tab(t: string): void { if (["ask", "notes", "history"].indexOf(t) >= 0) { root.tab = t; root.refresh(); } }
+        function tab(t: string): void { if (["ask", "notes", "history", "grok"].indexOf(t) >= 0) { root.tab = t; root.refresh(); } }
         function quit(): void { Qt.quit(); }
     }
 
@@ -165,6 +179,13 @@ ShellRoot {
                         Text { color: root.phase === "listening" ? Colors.background : Colors.foreground; font.pixelSize: 12; font.bold: root.phase === "listening"
                             text: root.phase === "listening" ? "Mic on · " + root.heardFor + " s / 30 s" : "Transcribing…" } }
                 }
+                Rectangle {   // cloud indicator: amber whenever the current answer goes to xAI
+                    visible: root.via === "cloud" || (root.via === "" && !!root.cl.enabled)
+                    implicitHeight: 26; implicitWidth: cloudPill.implicitWidth + 22; radius: 13
+                    color: root.via === "cloud" ? root.amber : Colors.surface; border.color: root.amber; border.width: 1
+                    Text { id: cloudPill; anchors.centerIn: parent; font.pixelSize: 12; font.bold: root.via === "cloud"
+                        color: root.via === "cloud" ? Colors.background : Colors.foreground
+                        text: root.via === "cloud" ? "☁ Grok · cloud · " + root.cl.model : "Grok tier on · " + (root.cl.used_today || 0) + "/" + root.cl.cap + " today" } }
                 Rectangle {   // local / offline indicator + model state
                     implicitHeight: 26; implicitWidth: pill.implicitWidth + 22; radius: 13
                     color: Colors.surface; border.color: Colors.overlay; border.width: 1
@@ -180,11 +201,12 @@ ShellRoot {
                 Btn { label: "Ask"; on: root.tab === "ask"; onClicked: root.tab = "ask" }
                 Btn { label: "Notes (" + root.notesList.length + ")"; on: root.tab === "notes"; onClicked: { root.tab = "notes"; root.refresh(); } }
                 Btn { label: "History"; on: root.tab === "history"; onClicked: { root.tab = "history"; root.refresh(); } }
+                Btn { label: root.cl.enabled ? "Grok ☁" : "Grok"; on: root.tab === "grok"; onClicked: { root.tab = "grok"; statusP.running = true; } }
                 Item { Layout.fillWidth: true }
             }
 
             StackLayout { Layout.fillWidth: true; Layout.fillHeight: true
-                currentIndex: root.tab === "ask" ? 0 : (root.tab === "notes" ? 1 : 2)
+                currentIndex: ["ask", "notes", "history", "grok"].indexOf(root.tab)
 
             ColumnLayout { spacing: 12   // Ask
             Rectangle { Layout.fillWidth: true; implicitHeight: 38; radius: 8; color: Colors.surface; border.color: Colors.overlay; border.width: 1
@@ -202,6 +224,10 @@ ShellRoot {
                     onContentHeightChanged: if (root.busy) contentY = Math.max(0, contentHeight - height)
                     ColumnLayout { id: col; width: fl.width; spacing: 8
                         Text { visible: root.question.length > 0; text: root.question; color: Colors.muted; font.pixelSize: 13; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        Text { visible: root.via !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 12; font.bold: root.via === "cloud"
+                            color: root.via === "cloud" ? root.amber : Colors.muted
+                            text: root.via === "cloud" ? "☁ Sent to Grok in the cloud (xAI, " + root.cl.model + "). Notes and file contents stay here unless you allowed them."
+                                                       : "Answered on this computer" + (root.viaWhy ? ": " + root.viaWhy : "") }
                         Text { text: root.answer.length ? root.plain(root.answer) : (root.question.length ? (root.busy ? "Thinking…" : "") :
                                      "I can check your Graphite version, disk, memory, network, battery, updates and failed services, read your config files and help with keybinds and settings. Say \"remember …\" to save a note. I can propose a settings change or installing/removing an app; nothing changes until you click Approve, and you can undo it. Speak (Super+Alt+A) to ask out loud; voice stays on this computer and no audio is kept.")
                                color: root.answer.length ? Colors.foreground : Colors.muted; font.pixelSize: 14; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
@@ -257,6 +283,7 @@ ShellRoot {
                         text: root.st.history === "off" ? "History is off." : "No questions yet." }
                     ListView { id: hl; anchors { fill: parent; margins: 10 } clip: true; spacing: 6; model: root.historyList
                         delegate: RowLayout { width: hl.width; spacing: 8
+                            Text { text: modelData.cloud ? "☁" : ""; color: root.amber; font.pixelSize: 12; Layout.preferredWidth: 14 }
                             Text { text: modelData.state; font.pixelSize: 12; Layout.preferredWidth: 80
                                 color: modelData.state === "done" ? Colors.accent : Colors.muted }
                             Text { text: modelData.question || "(not kept)"; color: Colors.foreground; font.pixelSize: 13; elide: Text.ElideRight; textFormat: Text.PlainText; Layout.fillWidth: true }
@@ -267,6 +294,32 @@ ShellRoot {
                     Btn { label: "Clear history"; onClicked: root.run(["graphite-agent", "history", "clear"]) }
                     Btn { label: root.st.agents === "off" ? "Multiple agents: off" : "Multiple agents: on"
                         onClicked: root.run(["graphite-agent", "agents", root.st.agents === "off" ? "on" : "off"]) } }
+            }
+
+            ColumnLayout { spacing: 10   // Grok: optional cloud tier, your own xAI key, off by default
+                Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Colors.foreground; font.pixelSize: 13; textFormat: Text.PlainText
+                    text: "Optional: answer with xAI's Grok in the cloud, using your own xAI API key (billed to your xAI account). Off by default. "
+                        + "What is sent: your question, the assistant's instructions and the results of the system tools it calls (version, memory, disk, network, battery, updates). "
+                        + "Notes and config-file contents stay on this computer unless you allow them below; history is never sent. "
+                        + "Approvals and undo work the same. If the cloud fails, you're offline or the daily limit is reached, the local model answers." }
+                Rectangle { Layout.fillWidth: true; implicitHeight: 38; radius: 8; color: Colors.surface; border.color: Colors.overlay; border.width: 1
+                    TextInput { id: keyIn; anchors { fill: parent; leftMargin: 12; rightMargin: 12 } verticalAlignment: TextInput.AlignVCenter
+                        color: Colors.foreground; font.pixelSize: 14; clip: true; echoMode: TextInput.Password; maximumLength: 256
+                        onAccepted: if (text.trim().length && !keyP.running) keyP.running = true
+                        Text { visible: !keyIn.text.length; anchors.verticalCenter: parent.verticalCenter; color: Colors.muted; font.pixelSize: 14
+                            text: root.cl.key && root.cl.key !== "none" ? "Key saved (" + root.cl.key + "). Paste a new one to replace it" : "Paste your xAI API key (Enter to save)" } } }
+                RowLayout { spacing: 8
+                    Btn { label: "Save key"; onClicked: if (keyIn.text.trim().length && !keyP.running) keyP.running = true }
+                    Btn { label: "Forget key"; visible: !!root.cl.key && root.cl.key !== "none"; onClicked: root.run(["graphite-agent", "cloud", "forget-key"]) }
+                    Btn { label: root.cl.enabled ? "Grok: on" : "Grok: off"; on: !!root.cl.enabled
+                        onClicked: root.run(["graphite-agent", "cloud", root.cl.enabled ? "off" : "on"]) } }
+                RowLayout { spacing: 8
+                    Btn { label: root.cl.share_notes ? "Send notes: on" : "Send notes: off"; onClicked: root.run(["graphite-agent", "cloud", "share-notes", root.cl.share_notes ? "off" : "on"]) }
+                    Btn { label: root.cl.share_files ? "Send config files: on" : "Send config files: off"; onClicked: root.run(["graphite-agent", "cloud", "share-files", root.cl.share_files ? "off" : "on"]) } }
+                Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Colors.muted; font.pixelSize: 12
+                    text: "Model " + (root.cl.model || "") + " at " + (root.cl.endpoint || "") + " · " + (root.cl.used_today || 0) + " of " + (root.cl.cap || 0) + " cloud requests used today (a question uses 1-4). "
+                        + "Change with: graphite-agent cloud model NAME, cloud cap N." }
+                Item { Layout.fillHeight: true }
             }
             }
 
