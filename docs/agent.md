@@ -116,6 +116,43 @@ The model service starts on demand (opening the panel warms it up) and drops the
 15 idle minutes. Extra llama-server flags go in `~/.config/graphite/agent.env`, e.g.
 `GRAPHITE_LLM_ARGS="-t 4"`.
 
+## Several agents (Stage 5)
+A coordinator hands each question to one or more named specialists, one after another on the
+**same** local model (one llama-server, one answer at a time under the daemon's lock: no extra
+RAM, no second model). The coordinator makes one short grammar-constrained JSON plan
+(`response_format` json_schema: agent names are an enum, at most 3 steps); every specialist then
+gets its own short prompt and **only its own tools** (a call to any other tool is refused in
+`graphite-agent`, outside the model):
+
+| Agent | Tools |
+|---|---|
+| System | os_release, system_status, network_status, battery_status, recent_updates, failed_services, read_config (read only) |
+| Settings | change_setting, graphite_help |
+| Software | install_app, remove_app, graphite_help |
+| Notes | search_notes |
+| Help | graphite_help |
+| Assistant (general) | every tool, the Stage 4 prompt |
+
+Later agents get a short summary of what earlier ones found (labelled as data). If the plan
+doesn't parse, names an unknown agent or has more than 3 steps, the general agent answers alone
+(the Stage 4 behaviour); `graphite-agent agents off` (or *Multiple agents: off* in History)
+always does that. Limits per question: 3 hops, 6 tool calls shared by all hops, 3 tool rounds
+and 120 s per hop, 30 s for the plan, 180 s in total. **Changes are unchanged**: specialists can
+only *propose*, at most one change per question across all hops, and only Approve on the card
+runs it (with its snapshot and undo); System, Notes and Help have no change tools at all.
+
+The audit log (`graphite-agent audit TASK`) records the plan, every hop (`hop`, `hop_done` with
+its tool-call count) and tags each tool call with its agent; `history --json` lists the agents
+per question. The panel shows "Agents: System: ✓ system_status → Settings: ✓ change_setting",
+"proposed by the Settings agent" on the card, and the agents per question in History.
+
+Measured on the box (8 threads, `-t 4`, Qwen3.5-2B Q4_K_M), 13 test questions: every one routed
+to the right agent(s), including the compound ones ("How much RAM do I have? Also switch to the
+nord theme" -> System + Settings; with agents off the single agent called battery_status and
+couldn't answer the RAM part). Cost: one extra short model call per question, about 2-5 s
+(simple questions 5-11 s instead of 4-6 s; two-agent questions 11-20 s). A 2B model still
+sometimes repeats itself in a second hop.
+
 ## ISO and installer
 `graphite-agent-voice-model` (59.7 MB, whisper base.en q5_1) is handled exactly like the LLM
 package below: in `/usr/share/graphite-agent/models` (NoExtract on the live ISO), copied to the
@@ -136,9 +173,10 @@ place: no cache copy), so the target stores the model once. `install.sh`'s
 ## Tests
 `tests/agent-check.sh`: offline checks against a scripted mock llama-server (tool allowlist,
 argument validation, a forced `delete_files` call, the 3-round cap, serve flags, model pins,
-cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget; Stage 3: proposals change nothing, approve/undo/deny/expiry, undo conflict refusal, invalid values and protected packages refused, one proposal per question, failed snapshot blocks the change, crash -> interrupted, helper as root with a stand-in snapper: real pacman install/undo, injection refused; Stage 4 with a fake recorder/whisper/RHVoice/player: listen -> stop -> text, 0600 file in RAM deleted after transcription, transcription in the daemon and refused while an answer runs, silence, the 30 s cap, no orphan recorder after a kill, no paths or symlinks via the socket, say strips markdown and stops at once, voice model pin and ISO wiring, Super+Alt+A). `tests/smoke.sh` (VM) checks the package, the bind and
+cancel matching only the ask process; Stage 2: daemon socket modes, busy refusal, cancel through the daemon and on client exit, crash -> interrupted without replay, call budget, deadline, oversized requests, read_config path escapes and symlinks, notes retrieval/forget/export, nothing left in the db after forget; Stage 3: proposals change nothing, approve/undo/deny/expiry, undo conflict refusal, invalid values and protected packages refused, one proposal per question, failed snapshot blocks the change, crash -> interrupted, helper as root with a stand-in snapper: real pacman install/undo, injection refused; Stage 4 with a fake recorder/whisper/RHVoice/player: listen -> stop -> text, 0600 file in RAM deleted after transcription, transcription in the daemon and refused while an answer runs, silence, the 30 s cap, no orphan recorder after a kill, no paths or symlinks via the socket, say strips markdown and stops at once, voice model pin and ISO wiring, Super+Alt+A; Stage 5: the plan request shape, one-step plans behave like Stage 4, specialists offered and allowed only their tools, a change by the Settings agent is still only a proposal, two hops with the hand-off and audit trail, agents without change tools can't propose, one proposal across hops, the shared call budget, five kinds of bad plan -> one general agent, the per-hop time limit, agents off, the tool-call-as-text filter). `tests/smoke.sh` (VM) checks the package, the bind and
 that graphite-llm is not running at login.
 ![Graphite Agent panel](screenshots/agent-panel.png)
 ![Notes tab](screenshots/agent-notes.png)
 ![A proposed change](screenshots/agent-change.png)
 ![Voice](screenshots/agent-voice.png)
+![Several agents](screenshots/agent-agents.png)

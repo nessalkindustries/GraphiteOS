@@ -48,3 +48,7 @@ package graphite-agent-voice-model) and the recording is deleted as soon as it i
 text; no audio is kept. A spoken question gets its answer read aloud (RHVoice); Read aloud /
 Stop reading in the panel, `graphite-agent say TEXT`, `say --stop`. A spoken change still needs
 Approve on the card.
+Agents: a coordinator passes each question to one or more specialists (System, Settings, Software,
+Notes, Help), each allowed only its own tools, one after another on the same local model; the
+panel shows which agent did what. Changes still need Approve. `graphite-agent agents off` uses
+a single agent with every tool.

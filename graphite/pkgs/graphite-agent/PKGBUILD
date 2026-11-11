@@ -4,11 +4,13 @@
 # history + audit log, notes (SQLite FTS5), more read-only tools. Stage 3: proposed changes
 # (settings, theme, apps) approved in the panel, snapshot first, undo; pkexec helper for software.
 # Stage 4: offline voice: whisper.cpp speech input (model: graphite-agent-voice-model, ~60 MB),
-# RHVoice speech output, audio only in RAM; Super+Alt+A push-to-talk.
+# RHVoice speech output, audio only in RAM; Super+Alt+A push-to-talk. Stage 5: a coordinator hands
+# sub-tasks to specialist agents (system, settings, software, notes, help) with restricted tools,
+# one after another on the same local model; `graphite-agent agents off` = one agent.
 # The model is the separate graphite-agent-model package (~1.4 GB, installed by default);
 # `graphite-agent setup-model` is the repair/fallback. graphite-llm.service: user unit, never enabled.
 pkgname=graphite-agent
-pkgver=0.4.0
+pkgver=0.5.0
 pkgrel=1
 pkgdesc="Graphite Agent: offline assistant (llama.cpp, local Qwen model, notes, safe changes, voice)"
 arch=(any)
