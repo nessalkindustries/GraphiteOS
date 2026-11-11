@@ -1,0 +1,26 @@
+# shellcheck shell=bash disable=SC2034,SC2154
+# Graphite Agent offline speech recognition model (installed by default): whisper base.en,
+# q5_1 ggml for whisper.cpp (Arch whisper-cpp), so voice input works offline. Pinned to an exact
+# upstream commit + sha256; the same pin is in graphite-agent (VOICE_*), change both together.
+# Lives next to the LLM in /usr/share/graphite-agent/models, so the live ISO's NoExtract and
+# graphite-iso-install's in-place install treat it like graphite-agent-model (one copy).
+pkgname=graphite-agent-voice-model
+pkgver=2024.10.29     # date of the pinned ggerganov/whisper.cpp commit below
+pkgrel=1
+pkgdesc="Graphite Agent offline speech recognition: whisper base.en q5_1 (ggml, ~60 MB)"
+arch=(any)
+url="https://huggingface.co/ggerganov/whisper.cpp"
+license=(MIT)
+options=(!strip !debug)
+_bin=ggml-base.en-q5_1.bin
+source=("$_bin::https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/$_bin"
+        "LICENSE-whisper.cpp::https://raw.githubusercontent.com/ggml-org/whisper.cpp/d1be6fde11ac6e0407606b4e42fe72d34add8037/LICENSE")
+sha256sums=('4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f'
+            '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d')
+noextract=("$_bin")
+COMPRESSZST=(zstd -c -T0 -1 -)
+
+package() {
+  install -Dm644 "$srcdir/$_bin" "$pkgdir/usr/share/graphite-agent/models/$_bin"
+  install -Dm644 "$srcdir/LICENSE-whisper.cpp" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

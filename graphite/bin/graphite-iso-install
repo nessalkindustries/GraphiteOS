@@ -225,10 +225,11 @@ genfstab -U "$MNT" >> "$MNT/etc/fstab"
 # mount by subvolume *name* only: a rollback replaces @ with a new subvolume id
 sed -i -E 's/,?subvolid=[0-9]+//' "$MNT/etc/fstab"
 install -d "$MNT/var/lib/graphite"
-# the whole bundled repo except graphite-agent-model (~1.4 GB): that one is installed straight
-# from the ISO below, so the target stores it once (no repo copy, no pacman cache copy)
+# the whole bundled repo except the model packages (graphite-agent-model ~1.4 GB,
+# graphite-agent-voice-model ~60 MB): those are installed straight from the ISO below, so the
+# target stores them once (no repo copy, no pacman cache copy)
 install -d "$MNT/var/lib/graphite/repo"
-find "$REPO_SRC" -mindepth 1 -maxdepth 1 ! -name 'graphite-agent-model-*' -exec cp -a -t "$MNT/var/lib/graphite/repo" {} +
+find "$REPO_SRC" -mindepth 1 -maxdepth 1 ! -name 'graphite-agent-model-*' ! -name 'graphite-agent-voice-model-*' -exec cp -a -t "$MNT/var/lib/graphite/repo" {} +
 cp -a "$GRAPHITE_SRC" "$MNT/var/lib/graphite/src"
 # DNS inside the chroot. By default arch-chroot bind-mounts the live /etc/resolv.conf over the
 # target's, and on the live ISO that is systemd-resolved's stub (nameserver 127.0.0.53), and the
@@ -341,10 +342,10 @@ achroot "$MNT" pacman -Sy --noconfirm >/dev/null || die "pacman -Sy failed in th
 hv=$(achroot "$MNT" pacman -Si hyprland 2>/dev/null | awk '/^Version/{print $3; exit}')
 [[ -n $hv ]] || die "hyprland not found in the configured repos"
 log "hyprland $hv from ${SNAPSHOT:+archive snapshot $SNAPSHOT}"
-# graphite-agent-model: `pacman -U` reads the package in place (no cache copy) from a read-only
+# graphite-agent-model + graphite-agent-voice-model: `pacman -U` reads each package in place (no cache copy) from a read-only
 # bind mount of the ISO's repo, with its .sig, as graphite-keyring above; install.sh's --needed
 # then skips it. Later updates come from the remote [graphite] repo.
-for m in "$REPO_SRC"/graphite-agent-model-*.pkg.tar.zst; do
+for m in "$REPO_SRC"/graphite-agent-model-*.pkg.tar.zst "$REPO_SRC"/graphite-agent-voice-model-*.pkg.tar.zst; do
   [[ -f $m ]] || continue
   install -d "$MNT/var/lib/graphite/iso-repo"
   mount -o bind,ro "$REPO_SRC" "$MNT/var/lib/graphite/iso-repo"

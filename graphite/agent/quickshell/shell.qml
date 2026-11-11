@@ -28,14 +28,19 @@ ShellRoot {
     property var acts: []
     property var pending: acts.filter(a => a.state === "awaiting_approval")
     property bool acting: actP.running
+    property string phase: ""          // voice input: "" | "listening" | "transcribing"
+    property int heardFor: 0           // seconds listened so far
+    property bool spoken: false        // the last question was spoken: read the answer aloud
+    property bool speaking: sayP.running
 
     function refresh() { if (!notesP.running) notesP.running = true; if (!histP.running) histP.running = true; if (!actsP.running) actsP.running = true; }
     function decide(verb, id) { if (actP.running) return; actP.command = ["graphite-agent", verb, String(id), "--jsonl"]; actP.running = true; }
     function run(cmd) { act.command = cmd; act.running = true; }
 
-    function send(q) {
+    function send(q, byVoice) {
         q = q.trim();
         if (!q.length || ask.running) return;
+        root.spoken = !!byVoice; root.shutUp();
         root.question = q; root.answer = ""; root.note = ""; root.cited = ""; root.steps = [];
         ask.command = ["graphite-agent", "ask", "--jsonl", q];
         ask.running = true;
@@ -45,6 +50,15 @@ ShellRoot {
         return t.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1")
                 .replace(/^#{1,6}\s+/gm, "").replace(/^\s*[-*]\s+/gm, "• ");
     }
+    // voice: audio stays in RAM (XDG_RUNTIME_DIR) and is deleted once transcribed
+    function listen() {
+        if (listenP.running) { if (root.phase === "listening") listenP.signal(2); return; }
+        if (ask.running || !root.st.stt) return;
+        root.shutUp(); root.tab = "ask"; root.note = ""; root.heardFor = 0; root.phase = "listening";
+        listenP.running = true;
+    }
+    function say(t) { root.shutUp(); sayP.command = ["graphite-agent", "say", root.plain(t)]; sayP.running = true; }
+    function shutUp() { if (sayP.running) sayP.signal(15); }
     function stop() {
         if (ask.running) { ask.signal(15); ask.running = false; }
         cancelP.running = true;      // belt and braces: no answer keeps running in the background
@@ -63,8 +77,20 @@ ShellRoot {
             else if (m.type === "error") root.note = m.text;
             else if (m.type === "done" && root.note.startsWith("Checked")) root.note = "";
         } }
-        onExited: (code) => { if (code !== 0 && code !== 130 && !root.note.length) root.note = "The agent stopped (exit " + code + ")."; statusP.running = true; root.refresh(); }
+        onExited: (code) => { if (code !== 0 && code !== 130 && !root.note.length) root.note = "The agent stopped (exit " + code + ")."; statusP.running = true; root.refresh();
+            if (code === 0 && root.spoken && root.answer.length && root.st.tts) root.say(root.answer); }
     }
+    Process { id: listenP; command: ["graphite-agent", "listen", "--jsonl"]
+        stdout: SplitParser { onRead: data => {
+            let m; try { m = JSON.parse(data); } catch (e) { return; }
+            if (m.type === "listening") root.phase = "listening";
+            else if (m.type === "transcribing") root.phase = "transcribing";
+            else if (m.type === "heard") { root.phase = ""; root.send(m.text, true); }
+            else if (m.type === "error") root.note = m.text;
+        } }
+        onExited: root.phase = "" }
+    Timer { interval: 1000; repeat: true; running: root.phase === "listening"; onTriggered: root.heardFor += 1 }
+    Process { id: sayP }
     Process { id: cancelP; command: ["graphite-agent", "cancel"] }
     Process { id: unloadP; command: ["graphite-agent", "unload"]; onExited: { root.note = "Model unloaded; memory freed."; statusP.running = true; } }
     Process { id: setupP; command: ["kitty", "--title", "Graphite Agent: set up model", "sh", "-c", "graphite-agent setup-model; echo; read -r -p 'Press Enter to close' _"]
@@ -94,6 +120,7 @@ ShellRoot {
         function ask(q: string): void { root.send(q); }
         function stop(): void { root.stop(); }
         function state(): string { return root.busy ? "busy" : (root.st.server || "unknown"); }
+        function voice(): void { root.listen(); }
         function tab(t: string): void { if (["ask", "notes", "history"].indexOf(t) >= 0) { root.tab = t; root.refresh(); } }
         function quit(): void { Qt.quit(); }
     }
@@ -115,7 +142,7 @@ ShellRoot {
         title: "Graphite Agent"
         implicitWidth: 600; implicitHeight: 540
         color: Colors.background
-        onClosed: { root.stop(); Qt.quit(); }
+        onClosed: { if (listenP.running) listenP.signal(2); root.shutUp(); root.stop(); Qt.quit(); }
 
         ColumnLayout {
             anchors { fill: parent; margins: 18 } spacing: 12
@@ -123,6 +150,14 @@ ShellRoot {
             RowLayout { Layout.fillWidth: true; spacing: 10
                 Text { text: "Graphite Agent"; color: Colors.foreground; font.pixelSize: 20; font.bold: true }
                 Item { Layout.fillWidth: true }
+                Rectangle {   // microphone indicator: visible whenever the mic is recording
+                    visible: root.phase !== ""; implicitHeight: 26; implicitWidth: mic.implicitWidth + 22; radius: 13
+                    color: root.phase === "listening" ? Colors.red : Colors.surface; border.color: Colors.overlay; border.width: 1
+                    Row { id: mic; anchors.centerIn: parent; spacing: 6
+                        Rectangle { width: 8; height: 8; radius: 4; anchors.verticalCenter: parent.verticalCenter; color: Colors.background; visible: root.phase === "listening" }
+                        Text { color: root.phase === "listening" ? Colors.background : Colors.foreground; font.pixelSize: 12; font.bold: root.phase === "listening"
+                            text: root.phase === "listening" ? "Mic on · " + root.heardFor + " s / 30 s" : "Transcribing…" } }
+                }
                 Rectangle {   // local / offline indicator + model state
                     implicitHeight: 26; implicitWidth: pill.implicitWidth + 22; radius: 13
                     color: Colors.surface; border.color: Colors.overlay; border.width: 1
@@ -149,9 +184,11 @@ ShellRoot {
                 TextInput { id: q; anchors { fill: parent; leftMargin: 12; rightMargin: 12 } verticalAlignment: TextInput.AlignVCenter
                     color: Colors.foreground; font.pixelSize: 14; clip: true; focus: true
                     onAccepted: { root.send(text); text = ""; }
-                    Keys.onEscapePressed: root.busy ? root.stop() : Qt.quit()
+                    Keys.onEscapePressed: listenP.running ? root.listen() : root.speaking ? root.shutUp() : root.busy ? root.stop() : Qt.quit()
                     Text { visible: !q.text.length; anchors.verticalCenter: parent.verticalCenter; color: Colors.muted; font.pixelSize: 14
-                        text: root.st.model === false ? "The model is missing: Set up model… below" : "Ask about Graphite or this computer (Enter)" } } }
+                        text: root.st.model === false ? "The model is missing: Set up model… below"
+                            : root.phase === "listening" ? "Listening… speak now, then Stop (or Esc)"
+                            : "Ask about Graphite or this computer (Enter)" + (root.st.stt ? ", or Speak" : "") } } }
 
             Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: Colors.surface; clip: true
                 Flickable { id: fl; anchors { fill: parent; margins: 12 } contentHeight: col.implicitHeight; clip: true
@@ -159,7 +196,7 @@ ShellRoot {
                     ColumnLayout { id: col; width: fl.width; spacing: 8
                         Text { visible: root.question.length > 0; text: root.question; color: Colors.muted; font.pixelSize: 13; wrapMode: Text.Wrap; Layout.fillWidth: true }
                         Text { text: root.answer.length ? root.plain(root.answer) : (root.question.length ? (root.busy ? "Thinking…" : "") :
-                                     "I can check your Graphite version, disk, memory, network, battery, updates and failed services, read your config files and help with keybinds and settings. Say \"remember …\" to save a note. I can propose a settings change or installing/removing an app; nothing changes until you click Approve, and you can undo it.")
+                                     "I can check your Graphite version, disk, memory, network, battery, updates and failed services, read your config files and help with keybinds and settings. Say \"remember …\" to save a note. I can propose a settings change or installing/removing an app; nothing changes until you click Approve, and you can undo it. Speak (Super+Alt+A) to ask out loud; voice stays on this computer and no audio is kept.")
                                color: root.answer.length ? Colors.foreground : Colors.muted; font.pixelSize: 14; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
                         Text { visible: root.steps.length > 0; text: "Steps: " + root.steps.join("  "); color: Colors.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
                         Text { visible: root.cited.length > 0; text: "From your notes: " + root.cited; color: Colors.muted; font.pixelSize: 12; Layout.fillWidth: true }
@@ -225,6 +262,10 @@ ShellRoot {
 
             RowLayout { Layout.fillWidth: true; spacing: 8
                 Btn { label: root.busy ? "Stop" : "Ask"; on: root.busy; onClicked: root.busy ? root.stop() : (root.send(q.text), q.text = "") }
+                Btn { label: root.phase === "listening" ? "Stop listening" : root.phase === "transcribing" ? "…" : "Speak"
+                      on: root.phase === "listening"; visible: !!root.st.stt; onClicked: root.listen() }
+                Btn { label: root.speaking ? "Stop reading" : "Read aloud"; visible: !!root.st.tts && root.answer.length > 0 && !root.busy
+                      onClicked: root.speaking ? root.shutUp() : root.say(root.answer) }
                 Btn { label: "Unload model"; visible: !!root.st.model && root.st.server !== "down"; onClicked: { root.stop(); unloadP.running = true; } }
                 Btn { label: "Set up model…"; visible: root.st.model === false; onClicked: if (!setupP.running) setupP.running = true }
                 Text { text: root.note; color: Colors.muted; font.pixelSize: 12; elide: Text.ElideRight; Layout.fillWidth: true }

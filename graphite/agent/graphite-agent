@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""graphite-agent (Stage 3): a local assistant for Graphite OS.
+"""graphite-agent (Stage 4): a local assistant for Graphite OS.
 
 Local inference only (llama.cpp `llama-server`, user service graphite-llm.service, 127.0.0.1).
 A user-session daemon (graphite-agent.socket/.service, a 0600 Unix socket in XDG_RUNTIME_DIR,
@@ -9,7 +9,8 @@ tool call is validated here, outside the model; the tools are read-only and boun
 count, output size). Notes ("memory") are saved only when the user asks, kept in SQLite FTS5 on
 this computer, and can be listed, forgotten and exported. Changes (settings, theme, installing or
 removing an app) are only proposed by the model; they run after the user approves them in the
-panel, snapshot first, and can be undone. No shell, no file edits by the model, no cloud.
+panel, snapshot first, and can be undone. Voice is offline too (whisper.cpp in, RHVoice out);
+audio stays in RAM and is deleted once transcribed. No shell, no file edits by the model, no cloud.
 
   graphite-agent ask [--jsonl] QUESTION   answer one question (panel uses --jsonl)
   graphite-agent toggle|open|close        the panel (qs -c graphite-agent), Super+Shift+A
@@ -25,9 +26,14 @@ panel, snapshot first, and can be undone. No shell, no file edits by the model, 
   graphite-agent actions [--json]         proposed changes and their state
   graphite-agent approve|deny ID          run (snapshot first) or drop a proposed change
   graphite-agent undo ID                  reverse a done change (refused if changed since)
-  graphite-agent setup-model              repair/fallback: verify the model, else put a copy in
-                                          ~/.local/share/graphite-agent/models (from a local
-                                          graphite-agent-model package, else download, sha256)
+  graphite-agent listen [--jsonl]         record a spoken question (until listen --stop or 30 s),
+                                          print what was heard (offline whisper.cpp)
+  graphite-agent say TEXT|-               read text aloud (offline RHVoice); say --stop
+  graphite-agent voice                    Super+Alt+A: open the panel and start/stop listening
+  graphite-agent setup-model [--llm|--voice]  repair/fallback: verify the models, else put a copy
+                                          in ~/.local/share/graphite-agent/models (from a local
+                                          graphite-agent(-voice)-model package, else download,
+                                          sha256)
   graphite-agent serve [ARGS]             exec llama-server (graphite-llm.service runs this)
   graphite-agent daemon                   the session daemon (graphite-agent.service runs this)
 
@@ -716,6 +722,10 @@ class Out:
             print(kw["text"], file=sys.stderr, flush=True)
         elif kind in ("done", "cancelled"):
             print(flush=True)
+        elif kind == "heard":
+            print(kw["text"], flush=True)
+        elif kind == "listening":
+            print(f"Listening (up to {kw['max']} s, Ctrl+C to stop)…", file=sys.stderr, flush=True)
         elif kind == "result":
             print(kw["text"], flush=True)
         elif kind == "action":
@@ -1000,6 +1010,15 @@ class Daemon:
             return reply.emit("ok", cancelled=bool(c))
         if op == "status":
             return reply.emit("status", busy=self.current is not None, pid=os.getpid())
+        if op == "transcribe":        # one job at a time with answers: they share the CPU
+            if not self.gen.acquire(timeout=1):   # the client deletes its recording
+                return reply.emit("error", text="Another answer is still running. Stop it first.")
+            try:
+                return reply.emit("heard", text=_transcribe_owned(req.get("file")))
+            except (ValueError, OSError) as e:
+                return reply.emit("error", text=str(e))
+            finally:
+                self.gen.release()
         return self.extra(op, req, reply)
 
     def extra(self, op, req, reply):
@@ -1338,6 +1357,295 @@ def action_cmd(cmd, args):
         return 0
     return 2
 
+# ---------------------------------------------------------------- voice (offline)
+# Speech to text: whisper.cpp (`whisper-cli`, Arch whisper-cpp) with ggml-base.en-q5_1 from the
+# graphite-agent-voice-model package (ggerganov/whisper.cpp at commit 5359861, MIT; the same pin
+# is in pkgs/graphite-agent-voice-model/PKGBUILD, change both together). Text to speech: RHVoice
+# (`RHVoice-test`, English voice "slt"). Audio exists only in XDG_RUNTIME_DIR (RAM, the 0700
+# graphite-agent dir), recording stops after MAX_LISTEN s, and each file is deleted as soon as it
+# has been transcribed or played; no audio is ever kept. A spoken question is the same as a typed
+# one: proposed changes still need Approve on the card.
+VOICE_FILE = "ggml-base.en-q5_1.bin"
+VOICE_URL = ("https://huggingface.co/ggerganov/whisper.cpp/resolve/"
+             "5359861c739e955e79d9a303bcbc70fb988958b1/" + VOICE_FILE)
+VOICE_SHA256 = "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f"
+VOICE_SIZE = 59721011
+SYSTEM_VOICE = os.path.join(os.path.dirname(SYSTEM_MODEL), VOICE_FILE)  # graphite-agent-voice-model
+USER_VOICE = os.path.join(MODEL_DIR, VOICE_FILE)
+VOICE_DIR = os.path.dirname(SOCK)              # %t/graphite-agent, 0700, RAM
+MAX_LISTEN = 30                                # s of audio per question
+STT_TIMEOUT = 60
+MAX_HEARD = 600                                # chars of transcript
+MAX_SAY = 2000                                 # chars read aloud
+TTS_VOICE = "slt"
+# vocabulary hint for whisper (names it would otherwise spell as common words)
+STT_PROMPT = ("Graphite, Hyprland, Quickshell, kitty, Nord, Catppuccin, Gruvbox, Wi-Fi, Bluetooth, "
+              "pacman, cowsay, VLC, keyboard layout, natural scrolling.")
+REC_NAME = re.compile(r"rec-[0-9a-f]{16}\.wav")
+
+def voice_model():
+    for p in (SYSTEM_VOICE, USER_VOICE):
+        if os.path.exists(p):
+            return p
+    return None
+
+def voice_state():
+    return {"stt": bool(voice_model() and shutil.which("whisper-cli")),
+            "mic": bool(shutil.which("pw-record")),
+            "tts": bool(shutil.which("RHVoice-test") and shutil.which("pw-play")),
+            "voice_model_path": voice_model()}
+
+def _voice_dir():
+    os.makedirs(VOICE_DIR, mode=0o700, exist_ok=True)
+    st = os.lstat(VOICE_DIR)
+    if st.st_uid != os.getuid() or st.st_mode & 0o077 or not os.path.isdir(VOICE_DIR) \
+            or os.path.islink(VOICE_DIR):
+        raise OSError(f"{VOICE_DIR} is not a private directory")
+    now = time.time()                          # leftovers of a killed recording or playback:
+    for f in glob.glob(os.path.join(VOICE_DIR, "*.wav")):   # owner process gone, or too old
+        try:
+            m = re.fullmatch(r"(?:rec|say)-([0-9a-f]{8})[0-9a-f]{8}\.wav", os.path.basename(f))
+            if not m or not os.path.exists(f"/proc/{int(m.group(1), 16)}") \
+                    or now - os.lstat(f).st_mtime > 600:
+                os.unlink(f)
+        except OSError:
+            pass
+    for w in ("listen", "say"):                # pidfile of a process that is gone
+        if os.path.exists(_pidfile(w)) and not _signal_pidfile(w, 0, w):
+            try:
+                os.unlink(_pidfile(w))
+            except OSError:
+                pass
+    return VOICE_DIR
+
+def _audio_name(kind):
+    """rec-/say- + owner pid + random: a crashed owner's file is swept on the next use."""
+    return f"{kind}-{os.getpid() & 0xffffffff:08x}{os.urandom(4).hex()}.wav"
+
+def _die_with_parent():
+    try:                                       # PR_SET_PDEATHSIG: a killed panel stops the mic
+        import ctypes
+        ctypes.CDLL(None).prctl(1, signal.SIGTERM)
+    except (OSError, AttributeError):
+        pass
+
+def _peak(path):
+    """Peak sample (0..32767) of a 16-bit PCM wav; 0 if unreadable."""
+    import array, wave
+    try:
+        with wave.open(path, "rb") as w:
+            if w.getsampwidth() != 2:
+                return 32767
+            a = array.array("h", w.readframes(w.getnframes()))
+    except (OSError, EOFError, wave.Error):
+        return 0
+    return max((abs(x) for x in a), default=0)
+
+def transcribe(path):
+    """Text spoken in a 16 kHz wav (whisper-cli, offline). Raises ValueError with a user message."""
+    m = voice_model()
+    if not m or not shutil.which("whisper-cli"):
+        raise ValueError("Voice input isn't installed: sudo pacman -S graphite-agent-voice-model")
+    if _peak(path) < 300:
+        raise ValueError("I didn't hear anything. Is the microphone muted?")
+    cmd = ["whisper-cli", "-m", m, "-f", path, "-l", "en", "-nt", "-np", "-t",
+           str(max(1, min(4, os.cpu_count() or 1))), "--prompt", STT_PROMPT]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=STT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise ValueError("Speech recognition took too long.")
+    if r.returncode != 0:
+        raise ValueError("Speech recognition failed.")
+    # drop whisper's non-speech markers: [BLANK_AUDIO], (music), [Silence] ...
+    text = re.sub(r"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*", " ", r.stdout)
+    text = " ".join(text.split())[:MAX_HEARD]
+    if not re.search(r"\w", text):
+        raise ValueError("I didn't catch that. Try again a little closer to the microphone.")
+    return text
+
+def _transcribe_owned(name):
+    """Daemon side: transcribe and delete a recording in our own private dir (name only)."""
+    if not isinstance(name, str) or not REC_NAME.fullmatch(name):
+        raise ValueError("bad recording")
+    path = os.path.join(_voice_dir(), name)
+    try:
+        st = os.lstat(path)
+        if not (st.st_mode & 0o170000 == 0o100000) or st.st_uid != os.getuid():
+            raise ValueError("bad recording")
+        return transcribe(path)
+    except FileNotFoundError:
+        raise ValueError("The recording is gone.")
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+def _pidfile(name):
+    return os.path.join(VOICE_DIR, name + ".pid")
+
+def _signal_pidfile(name, sig, word):
+    """Signal the graphite-agent `word` process recorded in the pidfile; True if there was one."""
+    try:
+        pid = int(_read(_pidfile(name)).strip())
+        cmd = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+        if os.stat(f"/proc/{pid}").st_uid != os.getuid() or \
+                not any(c.endswith(b"graphite-agent") for c in cmd) or word.encode() not in cmd:
+            return False
+        os.kill(pid, sig)
+        return True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+def listen_cmd(args, out):
+    """Record from the default microphone until stopped (listen --stop, Esc, the button) or
+    MAX_LISTEN s, then transcribe (in the daemon, one job at a time with answers)."""
+    if "--stop" in args:
+        return 0 if _signal_pidfile("listen", signal.SIGINT, "listen") else 1
+    vd = _voice_dir()
+    name = _audio_name("rec")
+    path = os.path.join(vd, name)
+    if "--file" in args:                       # transcribe an existing wav (tests, accessibility)
+        src = args[args.index("--file") + 1]
+        shutil.copyfile(src, path)
+        os.chmod(path, 0o600)
+    else:
+        if not voice_state()["stt"]:
+            out.emit("error", text="Voice input isn't installed: sudo pacman -S graphite-agent-voice-model")
+            return 1
+        if not shutil.which("pw-record"):
+            out.emit("error", text="No pw-record (PipeWire) to record from the microphone.")
+            return 1
+        if _signal_pidfile("listen", 0, "listen"):
+            out.emit("error", text="Already listening.")
+            return 1
+        with open(_pidfile("listen"), "w") as f:
+            f.write(str(os.getpid()))
+        stop = threading.Event()
+        old = {s: signal.signal(s, lambda *_: stop.set()) for s in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            old_umask = os.umask(0o077)
+            try:
+                rec = subprocess.Popen(["pw-record", "--rate", "16000", "--channels", "1",
+                                        "--format", "s16", path], preexec_fn=_die_with_parent,
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+            finally:
+                os.umask(old_umask)
+            out.emit("listening", max=MAX_LISTEN)
+            end = time.time() + MAX_LISTEN
+            while not stop.is_set() and time.time() < end and rec.poll() is None:
+                stop.wait(0.1)
+            if rec.poll() is None:
+                rec.send_signal(signal.SIGINT)     # pw-record finishes the wav header on SIGINT
+                try:
+                    rec.wait(3)
+                except subprocess.TimeoutExpired:
+                    rec.kill(); rec.wait()
+        finally:
+            for s, h in old.items():
+                signal.signal(s, h)
+            try:
+                os.unlink(_pidfile("listen"))
+            except OSError:
+                pass
+    out.emit("transcribing")
+    try:
+        r = daemon_request({"op": "transcribe", "file": name}, start=True, timeout=STT_TIMEOUT + 10)
+        if r is None:                          # no daemon possible: same work in this process
+            text = _transcribe_owned(name)
+        elif r and r[0].get("type") == "heard":
+            text = r[0]["text"]
+        else:
+            raise ValueError((r[0].get("text") if r else "") or "Speech recognition failed.")
+    except ValueError as e:
+        out.emit("error", text=str(e))
+        return 1
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    out.emit("heard", text=text)
+    return 0
+
+def speakable(text):
+    """Answer text as it should be read: no markdown, citations or paths spelled out."""
+    t = re.sub(r"```.*?```", " ", text, flags=re.S)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"\[(?:n|a)?[0-9]+\]|\((?:note )?n[0-9]+\)", " ", t)      # [n3] (n3) citations
+    t = re.sub(r"[`*_#>|]+", " ", t)
+    t = " ".join(t.split())
+    if len(t) > MAX_SAY:
+        t = t[:MAX_SAY].rsplit(" ", 1)[0] + "."
+    return t
+
+def say_cmd(args):
+    """Read text aloud offline (RHVoice -> pw-play); `say --stop` stops it."""
+    if "--stop" in args:
+        return 0 if _signal_pidfile("say", signal.SIGTERM, "say") else 1
+    text = sys.stdin.read() if args in ([], ["-"]) else " ".join(args)
+    text = speakable(text)
+    if not text:
+        return 0
+    if not voice_state()["tts"]:
+        print("Reading aloud needs rhvoice and pipewire (pw-play).", file=sys.stderr)
+        return 1
+    vd = _voice_dir()
+    _signal_pidfile("say", signal.SIGTERM, "say")    # one voice at a time
+    with open(_pidfile("say"), "w") as f:
+        f.write(str(os.getpid()))
+    path = os.path.join(vd, _audio_name("say"))
+    procs = []
+    def stop(*_):
+        for p in procs:
+            if p.poll() is None:
+                p.terminate()
+        raise KeyboardInterrupt
+    old = {s: signal.signal(s, stop) for s in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        old_umask = os.umask(0o077)
+        try:
+            p = subprocess.Popen(["RHVoice-test", "-p", TTS_VOICE, "-o", path], stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 preexec_fn=_die_with_parent)
+        finally:
+            os.umask(old_umask)
+        procs.append(p)
+        p.communicate(text.encode(), timeout=60)
+        if p.returncode != 0 or not os.path.exists(path):
+            print("Speech synthesis failed.", file=sys.stderr)
+            return 1
+        p = subprocess.Popen(["pw-play", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, preexec_fn=_die_with_parent)
+        procs.append(p)
+        p.wait()
+        return 0
+    except KeyboardInterrupt:
+        return 130
+    except subprocess.TimeoutExpired:
+        return 1
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
+        for f in (path, _pidfile("say")):
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+def voice_toggle():
+    """Super+Alt+A: open the panel if needed and start (or stop) listening."""
+    if not _pgrep(PANEL):
+        panel("open")
+    for _ in range(30):
+        r = subprocess.run(["qs", "-c", "graphite-agent", "ipc", "call", "agent", "voice"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0:
+            return 0
+        time.sleep(0.2)
+    return 1
+
 # ---------------------------------------------------------------- panel / service control
 
 def _pgrep(pattern):
@@ -1397,6 +1705,7 @@ def status(as_json):
     db = _store()
     st["notes"] = len(db.notes()) if db else 0
     st["history"] = db.pref("history", "on") if db else "unknown"
+    st.update(voice_state())
     if as_json:
         print(json.dumps(st))
     else:
@@ -1404,58 +1713,68 @@ def status(as_json):
             print(f"{k}: {v}")
     return 0
 
-def setup_model():
-    """Repair/fallback. Normally the graphite-agent-model package provides the model."""
-    if os.path.exists(SYSTEM_MODEL):
-        print(f"Checking {SYSTEM_MODEL} (graphite-agent-model) …")
-        if _sha256(SYSTEM_MODEL) == MODEL_SHA256:
-            print("The model is installed and verified.")
+def setup_model(which=("llm", "voice")):
+    """Repair/fallback. Normally graphite-agent-model / graphite-agent-voice-model provide them."""
+    rc = 0
+    if "llm" in which:
+        rc |= _setup_one("model", MODEL_FILE, SYSTEM_MODEL, USER_MODEL, MODEL_SHA256, MODEL_SIZE,
+                         MODEL_URL, "graphite-agent-model")
+    if "voice" in which:
+        rc |= _setup_one("voice model", VOICE_FILE, SYSTEM_VOICE, USER_VOICE, VOICE_SHA256,
+                         VOICE_SIZE, VOICE_URL, "graphite-agent-voice-model")
+    return rc
+
+def _setup_one(what, fname, system, user, sha, size, url, pkgname):
+    if os.path.exists(system):
+        print(f"Checking {system} ({pkgname}) …")
+        if _sha256(system) == sha:
+            print(f"The {what} is installed and verified.")
             return 0
-        print("The packaged model is damaged. Repair it with: sudo pacman -S graphite-agent-model")
+        print(f"The packaged {what} is damaged. Repair it with: sudo pacman -S {pkgname}")
         return 1
     os.makedirs(MODEL_DIR, exist_ok=True)
-    if os.path.exists(USER_MODEL):
-        print(f"Checking {USER_MODEL} …")
-        if _sha256(USER_MODEL) == MODEL_SHA256:
-            print("Model already installed and verified.")
+    if os.path.exists(user):
+        print(f"Checking {user} …")
+        if _sha256(user) == sha:
+            print(f"The {what} is already installed and verified.")
             return 0
         print("Checksum mismatch; replacing it.")
     free = shutil.disk_usage(MODEL_DIR).free
-    if free < MODEL_SIZE + 200_000_000:
-        print(f"Not enough space: need {MODEL_SIZE / 1e9:.1f} GB, have {free / 1e9:.1f} GB.")
+    if free < size + 200_000_000:
+        print(f"Not enough space: need {size / 1e9:.1f} GB, have {free / 1e9:.1f} GB.")
         return 1
-    part = USER_MODEL + ".part"
-    local = [p for d in MODEL_PKG_DIRS for p in sorted(glob.glob(os.path.join(d, "graphite-agent-model-*.pkg.tar.zst")))]
+    part = user + ".part"
+    local = [p for d in MODEL_PKG_DIRS for p in sorted(glob.glob(os.path.join(d, pkgname + "-[0-9]*.pkg.tar.zst")))]
     for pkg in local:   # offline first: a local package, e.g. the live ISO's /opt/graphite-repo
-        print(f"Extracting the model from {pkg} …")
+        print(f"Extracting the {what} from {pkg} …")
         with open(part, "wb") as f:
-            r = subprocess.run(["bsdtar", "-xOf", pkg, "usr/share/graphite-agent/models/" + MODEL_FILE],
+            r = subprocess.run(["bsdtar", "-xOf", pkg, "usr/share/graphite-agent/models/" + fname],
                                stdout=f)
-        if r.returncode == 0 and _sha256(part) == MODEL_SHA256:
-            os.replace(part, USER_MODEL)
-            print("Model installed and verified. Open the agent with Super+Shift+A.")
+        if r.returncode == 0 and _sha256(part) == sha:
+            os.replace(part, user)
+            print(f"The {what} is installed and verified. Open the agent with Super+Shift+A.")
             return 0
-        print("That package did not contain a valid model; trying the next source.")
-    print(f"Downloading {MODEL_FILE} ({MODEL_SIZE / 1e9:.1f} GB) from huggingface.co …")
+        print(f"That package did not contain a valid {what}; trying the next source.")
+    print(f"Downloading {fname} ({size / 1e9:.2f} GB) from huggingface.co …")
     h, done, last = hashlib.sha256(), 0, 0.0
     try:
-        req = urllib.request.Request(MODEL_URL, headers={"User-Agent": "graphite-agent"})
+        req = urllib.request.Request(url, headers={"User-Agent": "graphite-agent"})
         with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
             while chunk := r.read(1 << 20):
                 f.write(chunk); h.update(chunk); done += len(chunk)
                 if time.time() - last > 1:
                     last = time.time()
-                    print(f"\r  {done * 100 // MODEL_SIZE:3d}%  {done / 1e6:7.0f} MB", end="", flush=True)
+                    print(f"\r  {done * 100 // size:3d}%  {done / 1e6:7.0f} MB", end="", flush=True)
     except (OSError, urllib.error.URLError) as e:
         print(f"\nDownload failed: {e}")
         return 1
     print()
-    if h.hexdigest() != MODEL_SHA256:
+    if h.hexdigest() != sha:
         os.remove(part)
         print(f"Checksum mismatch (got {h.hexdigest()}); the file was removed.")
         return 1
-    os.replace(part, USER_MODEL)
-    print("Model installed and verified. Open the agent with Super+Shift+A.")
+    os.replace(part, user)
+    print(f"The {what} is installed and verified. Open the agent with Super+Shift+A.")
     return 0
 
 def serve(extra):
@@ -1567,11 +1886,23 @@ def main(argv):
     if cmd == "status":
         return status("--json" in argv)
     if cmd == "setup-model":
-        return setup_model()
+        return setup_model(("voice",) if "--voice" in argv else ("llm",) if "--llm" in argv
+                           else ("llm", "voice"))
     if cmd == "serve":
         return serve(argv[1:])
     if cmd == "daemon":
         return run_daemon()
+    if cmd == "listen":
+        out = Out("--jsonl" in argv)
+        try:
+            return listen_cmd([a for a in argv[1:] if a != "--jsonl"], out)
+        except OSError as e:
+            out.emit("error", text=f"Recording failed: {e}")
+            return 1
+    if cmd == "say":
+        return say_cmd(argv[1:])
+    if cmd == "voice":
+        return voice_toggle()
     if cmd in ("actions", "approve", "deny", "undo"):
         try:
             return action_cmd(cmd, argv[1:])

@@ -42,3 +42,9 @@ answers; `graphite-agent notes`, `forget ID|--all` and `export FILE` show, delet
 History keeps your questions for 30 days (`graphite-agent history off|clear`). Stop ends an
 answer; Unload (or `graphite-agent unload`) stops the model and frees its memory. The model comes
 with Graphite (package graphite-agent-model); `graphite-agent setup-model` checks or repairs it.
+Voice: click Speak in the panel (or press Super+Alt+A), talk, then Stop (or Super+Alt+A / Esc
+again; it stops by itself after 30 s). Speech recognition runs on this computer (whisper.cpp,
+package graphite-agent-voice-model) and the recording is deleted as soon as it is turned into
+text; no audio is kept. A spoken question gets its answer read aloud (RHVoice); Read aloud /
+Stop reading in the panel, `graphite-agent say TEXT`, `say --stop`. A spoken change still needs
+Approve on the card.
