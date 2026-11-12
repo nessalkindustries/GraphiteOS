@@ -49,5 +49,11 @@ readlink /etc/resolv.conf; if timeout 5 getent ahosts archive.archlinux.org >/de
 graphite-iso-install --disk /dev/vda --user tester --password 'graphite-test' \
   --luks-pass 'graphite-luks' --hostname graphite-test --timezone America/Toronto \
   --profile "${GRAPHITE_TEST_PROFILE:-desktop}" --serial-console --selftest /tmp/selftest.sh --yes
+# Optional TEST-ONLY package injection. The harness only serves inject-packages.sh
+# when --packages was given; a 404 is normal and must not abort (set -e).
+if curl -fsS "$HOST/inject-packages.sh" -o /tmp/inject-packages.sh; then
+  echo "harness: injecting TEST-ONLY packages into the installed system"
+  bash /tmp/inject-packages.sh --from-live || echo "harness: inject at install failed (will retry on first boot)"
+fi
 sync
 systemctl poweroff
