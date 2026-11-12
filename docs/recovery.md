@@ -53,9 +53,11 @@ sudo umount /mnt
 ```
 
 ## Verified by the test harness
-`tests/qemu-install.py` covers these on every run:
+`tests/qemu-install.py --profile desktop` (the full run, **REQUIRED before any release**) covers these on every run:
 - `graphite update` takes a labelled pre-update snapshot
 - snap-pac pairs are created
 - the GRUB snapshot submenu boots read-only
 - `graphite rollback` removes a package installed after the snapshot
 - grub-btrfs entries still exist after a rollback
+
+`--profile quick` is a shorter developer path: one install, one boot, and the core selftest. It does **not** verify snapshot boot or rollback. See [tests/README.md](../tests/README.md).

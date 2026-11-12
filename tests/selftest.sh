@@ -13,6 +13,21 @@ check() { if eval "$2" >/dev/null 2>&1; then say "ok   $1"; else say "FAIL $1"; 
 next() { echo "$1" > "$ST/stage"; sync; }
 cmdline=$(cat /proc/cmdline)
 
+# SELFTEST_MODE=quick is prepended by the harness for --profile quick:
+# one boot, common_checks, optional update, then ALL DONE (no snapshot/rollback).
+# SELFTEST_GROUPS is a comma-separated list; unset means all (desktop/full).
+selftest_want() {
+  local groups=${SELFTEST_GROUPS:-all} g
+  [[ ${SELFTEST_MODE:-full} != quick || $groups == all ]] && return 0
+  local IFS=,
+  for g in $groups; do
+    g=${g// /}
+    [[ $g == all || $g == "$1" ]] && return 0
+  done
+  return 1
+}
+
+
 common_checks() {
   # we are part of the boot transaction ourselves, so 'is-system-running --wait'
   # would deadlock: wait (bounded) until our own job is the only one left instead
@@ -78,7 +93,43 @@ common_checks() {
 case $stage in
 1)
   say "STAGE1 begin (fresh install, first boot)"
+  # TEST-ONLY package injection fallback: autoinstall normally injects before
+  # first boot; if that missed, fetch the harness script (only when --packages
+  # set HARNESS_INJECT_HOST). A missing marker + no host is a no-op.
+  if [[ -n ${HARNESS_INJECT_HOST:-} && ! -f /var/lib/graphite/harness-injected-packages ]]; then
+    if curl -fsS "$HARNESS_INJECT_HOST/inject-packages.sh" -o /tmp/inject-packages.sh; then
+      say "injecting TEST-ONLY packages on first boot"
+      if bash /tmp/inject-packages.sh; then say "ok   TEST-ONLY package injection"; else say "FAIL TEST-ONLY package injection"; fails=$((fails+1)); fi
+    fi
+  fi
   common_checks
+  if [[ ${SELFTEST_MODE:-full} == quick ]]; then
+    say "diag: enable sddm on the booted system -> $(systemctl enable sddm.service 2>&1 | tr '\n' ' ') rc=${PIPESTATUS[0]}"
+    if selftest_want update; then
+      pre=$(pacman -Q graphite-config | cut -d" " -f2)
+      say "running graphite update --yes (news check, -Syu, migrations, pacdiff)"
+      if HOME=/root graphite update --yes > "$ST/update.log" 2>&1; then say "ok   graphite update"; else say "FAIL graphite update"; tail -20 "$ST/update.log"; fails=$((fails+1)); fi
+      if sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep -q "^Server = http"; then
+        post=$(pacman -Q graphite-config | cut -d" " -f2); say "diag remote update: graphite-config $pre -> $post"
+        check "graphite update pulled newer graphite-config from the remote repo" '[[ $post != "$pre" && $post == "$pre".* ]]'
+        check "graphite-keyring updated from the remote repo" '[[ $(pacman -Q graphite-keyring | cut -d" " -f2) == *.* ]]'
+      fi
+      say "running full pacman -Syu"
+      if pacman -Syu --noconfirm > "$ST/syu.log" 2>&1; then say "ok   pacman -Syu"; else say "FAIL pacman -Syu"; tail -20 "$ST/syu.log"; fails=$((fails+1)); fi
+      check "graphite update took a labelled pre-update snapshot" 'grep -q "pre-update snapshot: #" "$ST/update.log" && snapper -c root list | grep -q "graphite update"'
+      sed 's/^/  | /' "$ST/update.log" | tail -15
+    else
+      say "quick: skipping graphite update (pass --checks update to include it)"
+    fi
+    say "ALL DONE fails=$fails"
+    systemctl disable graphite-selftest.service >/dev/null 2>&1
+    if systemctl is-enabled sddm.service >/dev/null 2>&1; then
+      mkdir -p /etc/sddm.conf.d
+      printf '[Autologin]\nUser=%s\nSession=hyprland\n' "$U" > /etc/sddm.conf.d/99-harness-autologin.conf
+    fi
+    systemctl poweroff
+    exit 0
+  fi
   say "diag: enable sddm on the booted system -> $(systemctl enable sddm.service 2>&1 | tr '\n' ' ') rc=${PIPESTATUS[0]}"
   check "snapper root config" 'snapper -c root list'
   pre=$(pacman -Q graphite-config | cut -d" " -f2)

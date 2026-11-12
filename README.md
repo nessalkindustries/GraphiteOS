@@ -37,6 +37,8 @@ Configs live in `~/.config` and belong to you. If you re-run the installer, any 
 ./test-qemu.sh bios 240            # serial log + screenshot in out/
 ```
 
+The QEMU install harness is `tests/qemu-install.py`. `--profile desktop` (the default) is the full release run and is **REQUIRED before any release**. `--profile quick` and `--packages` (reuse a last-good ISO and inject a locally built package) are shorter developer paths. See [tests/README.md](tests/README.md) for when to use each and for expected run times.
+
 ## License
 
 Copyright (C) 2026 Mathias Klassen / Nessalk Industries.
