@@ -53,6 +53,10 @@ from harness_lib import (
     selftest_prefix,
     smoke_groups_env,
     smoke_prefix,
+    apply_script_prefix,
+    SELFTEST_STALL_S,
+    login_prompt_seen,
+    selftest_stalled,
     stage_packages,
     validate_packages,
 )
@@ -208,6 +212,80 @@ expect(
     "selftest_prefix with packages on desktop only sets inject host",
 )
 expect_eq(smoke_prefix(["core", "desktop", "repo"]), "GRAPHITE_SMOKE_GROUPS=desktop\n", "smoke_prefix default quick")
+
+# --- apply_script_prefix: #! stays on line 1 (q1 regression) ----------------
+selftest_src = Path("tests/selftest.sh").read_text()
+smoke_src = Path("tests/smoke.sh").read_text()
+auto_src = Path("tests/autoinstall.sh").read_text()
+expect(selftest_src.startswith("#!"), "source selftest.sh starts with #!")
+expect(smoke_src.startswith("#!"), "source smoke.sh starts with #!")
+expect(auto_src.startswith("#!"), "source autoinstall.sh starts with #!")
+
+# Empty prefix (desktop/full, no packages): byte-identical to the source.
+expect(apply_script_prefix(selftest_src, "") == selftest_src, "desktop selftest serve is byte-identical to tests/selftest.sh")
+expect(apply_script_prefix(selftest_src, "") is selftest_src or apply_script_prefix(selftest_src, "") == selftest_src, "empty apply_script_prefix is a no-op")
+host = "http://10.0.2.2:8765"
+smoke_hosted = smoke_src.replace("@HOST@", host)
+expect(apply_script_prefix(smoke_hosted, smoke_prefix(["all"])) == smoke_hosted, "desktop smoke serve is byte-identical after @HOST@ replace")
+auto_hosted = auto_src.replace("@HOST@", host).replace("${GRAPHITE_TEST_PROFILE:-desktop}", "desktop")
+expect(auto_hosted.startswith("#!") and auto_hosted == auto_src.replace("@HOST@", host).replace("${GRAPHITE_TEST_PROFILE:-desktop}", "desktop"), "desktop autoinstall starts with #! and is the usual @HOST@/@profile replace only")
+
+# Quick + packages: assignments after the shebang, file still starts with #!.
+qp = selftest_prefix("quick", ["core", "desktop", "repo"], [pkg1], host)
+qs = apply_script_prefix(selftest_src, qp)
+expect(qs.startswith("#!"), "quick+packages served selftest starts with #!")
+expect(qs.splitlines()[0].startswith("#!"), "quick+packages selftest line 1 is the shebang")
+expect(
+    qs.splitlines()[0] == selftest_src.splitlines()[0],
+    "quick+packages selftest shebang line is unchanged",
+)
+expect("HARNESS_INJECT_HOST=" + host in qs.splitlines()[1] or "SELFTEST_MODE=quick" in qs.splitlines()[1], "quick+packages assignments start on line 2")
+expect("SELFTEST_MODE=quick" in qs and "SELFTEST_GROUPS=core,desktop,repo" in qs, "quick selftest still sets MODE and GROUPS")
+expect(qs.startswith("HARNESS_INJECT") is False and not qs.startswith("SELFTEST_MODE"), "quick selftest does not put assignments above the shebang")
+# The rest of the body after the inserted lines is unchanged.
+body_start = selftest_src.find("\n") + 1
+# After shebang + prefix, the original body follows
+expect(qs.endswith(selftest_src[body_start:]), "quick selftest body after the shebang is otherwise unchanged")
+
+sp = smoke_prefix(["core", "desktop", "repo"])
+ss = apply_script_prefix(smoke_hosted, sp)
+expect(ss.startswith("#!") and ss.splitlines()[0] == smoke_hosted.splitlines()[0], "quick served smoke starts with its original shebang")
+expect(ss.splitlines()[1] == "GRAPHITE_SMOKE_GROUPS=desktop", "quick smoke groups sit on line 2")
+expect(not ss.startswith("GRAPHITE_SMOKE_GROUPS"), "quick smoke does not put assignments above the shebang")
+
+# Inject script (generated, not prepended) already starts with #!.
+inj = generate_inject_script(["graphite-config-0.3.0-30-any.pkg.tar.zst"], host=host)
+expect(inj.startswith("#!"), "generated inject-packages.sh starts with #!")
+
+# Simulate a full serve tree the way qemu-install.py does.
+serve = os.path.join(td.name, "serve-www")
+os.makedirs(serve)
+for name, content in (
+    ("selftest.sh", qs),
+    ("smoke.sh", ss),
+    ("autoinstall.sh", auto_hosted),
+    ("inject-packages.sh", inj),
+):
+    open(os.path.join(serve, name), "w").write(content)
+    head = open(os.path.join(serve, name)).read(2)
+    expect(head == "#!", "served %s starts with #!" % name)
+
+# Stock desktop serve tree is byte-identical to the sources (smoke/@HOST@, autoinstall replace).
+desk_st = apply_script_prefix(selftest_src, selftest_prefix("desktop", ["all"], [], host))
+desk_sm = apply_script_prefix(smoke_hosted, smoke_prefix(["all"]))
+expect(desk_st == selftest_src, "full desktop selftest output is byte-identical to before")
+expect(desk_sm == smoke_hosted, "full desktop smoke output is byte-identical to before")
+
+# --- stall guard helpers ----------------------------------------------------
+expect(SELFTEST_STALL_S == 600, "SELFTEST_STALL_S is 10 minutes")
+expect(login_prompt_seen("graphite-test login: "), "login_prompt_seen matches graphite-test login:")
+expect(not login_prompt_seen("Started User Login Management."), "login_prompt_seen ignores User Login Management")
+expect(not login_prompt_seen("Starting User Login Management..."), "login_prompt_seen ignores Starting User Login Management")
+expect(not selftest_stalled("graphite-test login: ", 100, None), "selftest_stalled is false with no login_at")
+expect(not selftest_stalled("graphite-test login: \nSELFTEST: STAGE1 begin", 1000, 0, 600), "selftest_stalled is false once SELFTEST appears")
+expect(not selftest_stalled("graphite-test login: ", 599, 0, 600), "selftest_stalled is false before the limit")
+expect(selftest_stalled("graphite-test login: ", 600, 0, 600), "selftest_stalled is true at the limit with no SELFTEST")
+expect(selftest_stalled("graphite-test login: ", 900, 0, 600), "selftest_stalled is true after the limit with no SELFTEST")
 
 # every known group is classified
 unknown = [g for g in KNOWN_GROUPS if g not in (

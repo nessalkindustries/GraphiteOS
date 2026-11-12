@@ -271,7 +271,11 @@ def parse_harness_args(argv=None):
 
 
 def selftest_prefix(profile, groups, packages, host):
-    """Text prepended to the served selftest.sh. Empty for a stock desktop run."""
+    """Assignment lines for the served selftest.sh. Empty for a stock desktop run.
+
+    Must be inserted *after* the shebang via apply_script_prefix: systemd
+    ExecStart=/usr/local/sbin/graphite-selftest requires #! on line 1.
+    """
     lines = []
     if packages:
         lines.append("HARNESS_INJECT_HOST=%s" % host)
@@ -282,11 +286,60 @@ def selftest_prefix(profile, groups, packages, host):
 
 
 def smoke_prefix(groups):
-    """Text prepended to the served smoke.sh. Empty for a stock desktop run."""
+    """Assignment lines for the served smoke.sh. Empty for a stock desktop run.
+
+    Must be inserted after the shebang via apply_script_prefix.
+    """
     env = smoke_groups_env(groups)
     if env is None:
         return ""
     return "GRAPHITE_SMOKE_GROUPS=%s\n" % env
+
+
+def apply_script_prefix(script, prefix):
+    """Insert prefix lines after a leading shebang. Empty prefix is a no-op.
+
+    Returns the original string unchanged (byte-identical) when prefix is
+    empty, so a desktop/full serve matches the source file. Never places
+    assignments above #!: a script that does not start with #! would fail
+    systemd ExecStart / kernel direct exec (q1: env lines above the shebang
+    meant graphite-selftest never started).
+    """
+    if not prefix:
+        return script
+    if not prefix.endswith("\n"):
+        prefix = prefix + "\n"
+    if script.startswith("#!"):
+        nl = script.find("\n")
+        if nl < 0:
+            return script + "\n" + prefix
+        return script[: nl + 1] + prefix + script[nl + 1 :]
+    # Source scripts always have a shebang; keep #! on line 1 if one is missing.
+    return "#!/usr/bin/env bash\n" + prefix + script
+
+
+# Stall guard for selftest boots (not the smoke/SB boots). After the serial
+# login prompt, SELFTEST output must appear within this many seconds or the
+# harness fails the boot instead of waiting out the 3-hour qemu timeout.
+SELFTEST_STALL_S = 600
+
+
+def login_prompt_seen(text):
+    """True when the serial getty login prompt has appeared.
+
+    Looks for ' login:' (as in 'graphite-test login:') so 'User Login
+    Management' and similar systemd lines do not trigger it.
+    """
+    return " login:" in text
+
+
+def selftest_stalled(text, now, login_at, limit=SELFTEST_STALL_S):
+    """True if the login prompt was seen, no SELFTEST line yet, and limit expired."""
+    if login_at is None:
+        return False
+    if "SELFTEST:" in text:
+        return False
+    return (now - login_at) >= limit
 
 
 # Tokens @@HOST@@ etc. are replaced; the body is otherwise literal bash.
@@ -467,6 +520,10 @@ __all__ = [
     "parse_harness_args",
     "selftest_prefix",
     "smoke_prefix",
+    "apply_script_prefix",
+    "SELFTEST_STALL_S",
+    "login_prompt_seen",
+    "selftest_stalled",
     "generate_inject_script",
     "stage_packages",
 ]

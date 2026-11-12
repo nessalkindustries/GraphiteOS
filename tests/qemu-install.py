@@ -29,7 +29,8 @@ pacman CacheServer so the install doesn't re-download everything.
 import socket, glob, http.server, os, re, shutil, socketserver, subprocess, sys, threading, time
 from harness_lib import (
     HarnessArgError, parse_harness_args, stage_packages,
-    selftest_prefix, smoke_prefix,
+    selftest_prefix, smoke_prefix, apply_script_prefix,
+    login_prompt_seen, selftest_stalled, SELFTEST_STALL_S,
 )
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -70,14 +71,16 @@ def main(argv=None):
         open(os.path.join(www, "patch-selftest.sh"), "w").write(f.read().replace("@HOST@", host))
     LIVE_SCRIPT = "patch-selftest.sh" if (opts.patch_selftest and opts.keep_disk) else "autoinstall.sh"
     open(os.path.join(www, "selftest.sh"), "w").write(
-        selftest_prefix(TEST_PROFILE, opts.groups, opts.packages, host)
-        + open(os.path.join(ROOT, "tests", "selftest.sh")).read())
+        apply_script_prefix(
+            open(os.path.join(ROOT, "tests", "selftest.sh")).read(),
+            selftest_prefix(TEST_PROFILE, opts.groups, opts.packages, host)))
     for f in ("sb-enroll.sh", "sb-verify.sh"): open(os.path.join(www, f), "w").write(open(os.path.join(ROOT, "tests", f)).read().replace("@HOST@", host))
     if opts.overlay_secureboot:
         shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite-secureboot"), os.path.join(www, "graphite-secureboot"))
     open(os.path.join(www, "smoke.sh"), "w").write(
-        smoke_prefix(opts.groups)
-        + open(os.path.join(ROOT, "tests", "smoke.sh")).read().replace("@HOST@", host))
+        apply_script_prefix(
+            open(os.path.join(ROOT, "tests", "smoke.sh")).read().replace("@HOST@", host),
+            smoke_prefix(opts.groups)))
     shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite"), os.path.join(www, "graphite-bin"))
     if opts.overlay_installer:  # test a fixed installer without rebuilding the ISO
         shutil.copy(os.path.join(ROOT, "graphite", "bin", "graphite-iso-install"), os.path.join(www, "graphite-iso-install"))
@@ -183,8 +186,19 @@ def main(argv=None):
         sys.exit(1)
 
     # --- 2. boots of the installed system ---------------------------------------
-    def make_handler(boot):
+    def make_handler(boot, stall_selftest=False):
         def h(text, p, st):
+            # Fail fast if a selftest boot reaches the login prompt but never
+            # prints SELFTEST (e.g. the service failed to exec). Smoke/SB boots
+            # leave stall_selftest False: they have a login prompt and no selftest.
+            if stall_selftest:
+                if login_prompt_seen(text) and "st_login" not in st:
+                    st["st_login"] = time.monotonic()
+                if selftest_stalled(text, time.monotonic(), st.get("st_login"), SELFTEST_STALL_S) and not st.get("stalled"):
+                    st["stalled"] = 1
+                    note(f"boot {boot}: FAIL no SELFTEST output within {SELFTEST_STALL_S}s of login prompt (stall guard)")
+                    p.kill()
+                    return
             if re.search(r"Enter passphrase for|A password is required to access", text[-600:]) and not st.get(("pw", text.count("passphrase"))):
                 st[("pw", text.count("passphrase"))] = 1; time.sleep(1); send(p, LUKS + "\r")
             if boot == 2 and st.get("ph") in ("list", "kern"):
@@ -227,7 +241,7 @@ def main(argv=None):
     max_boot = 1 if opts.quick else 6
     for boot in ([] if SMOKE_ONLY else range(1, max_boot + 1)):
         t = time.monotonic()
-        out = qemu([], f"boot-{boot}.log", 3 * 3600, on_line=make_handler(boot))
+        out = qemu([], f"boot-{boot}.log", 3 * 3600, on_line=make_handler(boot, stall_selftest=True))
         note(f"boot {boot} ended after {int(time.monotonic()-t)}s")
         if "SELFTEST: ALL DONE" in out:
             break
