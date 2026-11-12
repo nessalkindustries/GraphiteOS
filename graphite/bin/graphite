@@ -67,6 +67,18 @@ for it in root.iter("item"):
   fi
 }
 
+# Drop the cached [graphite] db+sig so the next `pacman -Sy` fetches a matching pair
+# from one server. Pacman can keep a newer local db (HTTP 304) and still replace only
+# the .sig from an older remote, which then fails as "signature ... is invalid"
+# (see graphite-iso-install, commit a06dfec). Only these two files; never core/extra.
+drop_graphite_sync_db() {
+  if [[ $EUID -eq 0 ]]; then
+    rm -f /var/lib/pacman/sync/graphite.db /var/lib/pacman/sync/graphite.db.sig
+  else
+    sudo rm -f /var/lib/pacman/sync/graphite.db /var/lib/pacman/sync/graphite.db.sig
+  fi
+}
+
 unhold_hypr() {   # drop the TEMPORARY IgnorePkg hold the 0.56-era installer wrote
   grep -q '^# TEMPORARY hold until the hyprland.lua port' /etc/pacman.conf 2>/dev/null || return 0
   echo "--- Hyprland 0.57 is supported now: removing the old Hyprland IgnorePkg hold from /etc/pacman.conf"
@@ -98,6 +110,7 @@ update() {
   ((yes)) && pacargs+=(--noconfirm)
   # new or rotated repo keys must be in the keyring before packages signed with them
   # arrive (same pattern as archlinux-keyring); it is part of the same -Syu below
+  drop_graphite_sync_db
   if pacman -Q graphite-keyring >/dev/null 2>&1; then
     sudo pacman -Sy --needed "${pacargs[@]:1}" graphite-keyring
   fi

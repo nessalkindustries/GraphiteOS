@@ -60,7 +60,9 @@ common_checks() {
   if [[ -f /var/lib/graphite/repo/graphite.pub ]]; then
     check "[graphite] repo requires signatures" 'sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep -q "^SigLevel = Required"'
     check "[graphite] key locally trusted" 'pacman-key --list-keys "$(cat /var/lib/graphite/repo/graphite.fpr)"'
-    check "[graphite] db signature verifies" 'pacman -Sy --noconfirm >/dev/null && pacman -Si graphite-config'
+    # Same workaround as graphite-iso-install / graphite update: drop the cached
+    # [graphite] db+sig so -Sy cannot keep a newer local db and fetch only an older .sig.
+    check "[graphite] db signature verifies" 'rm -f /var/lib/pacman/sync/graphite.db /var/lib/pacman/sync/graphite.db.sig && pacman -Sy --noconfirm >/dev/null && pacman -Si graphite-config'
     # base-3: keyring package + remote repo
     check "graphite-keyring installed and populated" 'pacman -Q graphite-keyring && pacman-key --list-keys "$(cat /var/lib/graphite/repo/graphite.fpr)" | grep -q "\[ *full *\]"'
     if sed -n "/^\[graphite\]/,\$p" /etc/pacman.conf | grep -q "^Server = http"; then
