@@ -11,7 +11,10 @@ bootmodes=('bios.syslinux'
            'uefi.systemd-boot')
 pacman_conf="pacman.conf"
 airootfs_image_type="squashfs"
-airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86,arm64' '-b' '1M' '-Xdict-size' '1M')
+# Cap mksquashfs at 4 threads: 8-way xz has failed with
+# "FATAL ERROR: xz uncompress failed with error code 9" (a known parallel-xz flake).
+# Processor count does not change the squashfs contents.
+airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86,arm64' '-b' '1M' '-Xdict-size' '1M' '-processors' '4')
 bootstrap_tarball_compression=('zstd' '-c' '-T0' '--auto-threads=logical' '--long' '-19')
 file_permissions=(
   ["/opt/graphite"]="0:0:755"
