@@ -16,12 +16,13 @@ ShellRoot {
     property string wall: ""
     property var priv: ({})
     property var profs: ({})
+    property string zen: ""   // installed | available; empty until kernel status returns (unchecked)
     property string sb: ""
     property string msg: ""
 
     function kv(t) { const o = {}; for (const l of t.split("\n")) { const i = l.indexOf("="); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); } return o; }
     function run(cmd, note) { act.command = cmd; msg = note || ""; act.running = true; }
-    function reload() { themeP.running = true; privP.running = true; profP.running = true; }
+    function reload() { themeP.running = true; privP.running = true; profP.running = true; zenP.running = true; }
 
     Process { id: themeP; command: ["graphite-theme", "list"]; running: true
         stdout: StdioCollector { onStreamFinished: {
@@ -33,6 +34,8 @@ ShellRoot {
         stdout: StdioCollector { onStreamFinished: root.priv = root.kv(this.text) } }
     Process { id: profP; command: ["graphite-firstboot", "profiles"]; running: true
         stdout: StdioCollector { onStreamFinished: root.profs = root.kv(this.text) } }
+    Process { id: zenP; command: ["graphite-firstboot", "kernel"]; running: true
+        stdout: StdioCollector { onStreamFinished: { const o = root.kv(this.text); root.zen = o.zen || ""; } } }
     Process { id: sbP; command: ["graphite-firstboot", "secureboot"]; running: true
         stdout: StdioCollector { onStreamFinished: root.sb = this.text.trim() } }
     Process { id: act; onExited: (code) => { root.msg = code === 0 ? "Done" : "Failed (exit " + code + ")"; root.reload(); } }
@@ -72,7 +75,7 @@ ShellRoot {
 
     FloatingWindow {
         title: "Graphite Setup"
-        implicitWidth: 820; implicitHeight: 560
+        implicitWidth: 820; implicitHeight: 620
         color: Colors.background
         onClosed: Qt.quit()
 
@@ -125,6 +128,21 @@ ShellRoot {
                                 Text { text: modelData[2]; color: Colors.muted; font.pixelSize: 12 } }
                             Btn { label: root.profs[modelData[0]] === "installed" ? "Installed" : "Install"; on: root.profs[modelData[0]] === "installed"
                                   onClicked: if (root.profs[modelData[0]] !== "installed") root.run(["graphite-firstboot", "profile", modelData[0]], "Opening a terminal…") } } }
+                    // Optional Performance kernel: unchecked by default (standard linux stays the default).
+                    // Ticking it runs `graphite perf kernel zen` (linux-zen + headers, GRUB rebuild).
+                    RowLayout { Layout.fillWidth: true; spacing: 16
+                        Rectangle {   // checkbox: on only when linux-zen is already installed
+                            id: zenBox
+                            implicitWidth: 22; implicitHeight: 22; radius: 4
+                            color: root.zen === "installed" ? Colors.accent : Colors.surface
+                            border.width: 1; border.color: Colors.accent
+                            Text { anchors.centerIn: parent; text: "✓"; visible: root.zen === "installed"
+                                   color: Colors.accentText; font.pixelSize: 13; font.bold: true }
+                            MouseArea { anchors.fill: parent; enabled: root.zen !== "installed"
+                                        onClicked: root.run(["graphite-firstboot", "kernel", "zen"], "Opening a terminal…") } }
+                        ColumnLayout { Layout.fillWidth: true; spacing: 2
+                            Text { text: "Performance kernel (linux-zen)"; color: Colors.foreground; font.pixelSize: 15 }
+                            Text { text: "Opt-in, unchecked by default. Installs linux-zen and its headers and rebuilds GRUB. It appears under GRUB Advanced options; linux and linux-lts stay installed and remain the default."; color: Colors.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true } } }
                     Item { Layout.fillHeight: true } }
                 // 5. Secure Boot
                 ColumnLayout { anchors.fill: parent; visible: root.step === 4; spacing: 14

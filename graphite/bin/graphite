@@ -24,7 +24,7 @@ Usage: graphite <command> [args]
   splash on|off|status        Plymouth boot splash (initramfs hook + 'splash' on the kernel cmdline)
   control [status|...]       control center: volume, brightness, Wi-Fi, Bluetooth, power, theme (Super+A)
   settings [get|set K V|...]  Settings app: appearance, display, input, network, about (Super+I)
-  firstboot [open|reset|...]  guided first-boot setup (theme, wallpaper, privacy, profiles, Secure Boot)
+  firstboot [open|reset|...]  guided first-boot setup (theme, wallpaper, privacy, profiles, optional linux-zen, Secure Boot)
   installer [open|status|...] graphical installer (live ISO; graphite-iso-install is the unattended path)
   gpu status|plan|setup       detect Intel/AMD/NVIDIA GPUs and install the matching driver stack
   audio status|default|lowlatency [Q]  PipeWire latency presets (rtkit realtime)
