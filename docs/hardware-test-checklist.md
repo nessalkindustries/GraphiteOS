@@ -24,6 +24,7 @@ which has the same fields; or copy this list into a blank issue.
 - [ ] Installer finishes without errors (note duration)
 - [ ] LUKS passphrase prompt appears and works on first boot
 - [ ] GRUB menu shows Graphite, LTS and the snapshots submenu
+- [ ] First-boot setup offers optional Performance kernel (linux-zen), unchecked by default; if enabled, it appears under GRUB Advanced options (linux stays the default)
 - [ ] Boot time to login (approx.)
 
 ## Desktop

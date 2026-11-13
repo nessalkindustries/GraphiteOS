@@ -70,6 +70,7 @@ echo "SMOKE: SHOT firstboot-privacy"; sleep 3
 check "first-boot: privacy toggles (recent files off and on)" 'graphite-firstboot privacy set recent off && grep -q "gtk-recent-files-enabled=false" ~/.config/gtk-3.0/settings.ini && graphite-firstboot privacy set recent on && [ "$(graphite-firstboot privacy get | grep -c =on)" = 3 ]'
 check "first-boot: news opt-out is honored by graphite update" 'graphite-firstboot privacy set news off && [ -f ~/.config/graphite/privacy/no-news ] && graphite-firstboot privacy set news on && [ ! -f ~/.config/graphite/privacy/no-news ]'
 check "first-boot: profiles and Secure Boot hint answer" '[ "$(graphite-firstboot profiles | grep -cE "^(gaming|creator|dev|nvidia)=(installed|available)$")" = 4 ] && graphite-firstboot secureboot | grep -qi "secure boot"'
+check "first-boot: zen kernel option is available and not installed" '[ "$(graphite-firstboot kernel)" = zen=available ] && ! pacman -Qq linux-zen >/dev/null 2>&1'
 check "first-boot: bundled wallpapers listed" '[ -n "$(graphite-firstboot wallpapers)" ]'
 graphite-firstboot finish >/dev/null 2>&1
 for _ in $(seq 10); do ! timeout 10 hyprctl clients -j | grep -q "\"title\": \"Graphite Setup" && break; sleep 3; done

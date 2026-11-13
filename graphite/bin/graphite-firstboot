@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Guided first-boot setup (desk-7): theme, wallpaper, privacy, optional profiles,
-# Secure Boot hint. Hyprland runs `graphite-firstboot auto` at every login; it opens the
-# Quickshell window (config graphite-firstboot) until the user finishes or skips it once.
+# optional Performance kernel (linux-zen), Secure Boot hint. Hyprland runs
+# `graphite-firstboot auto` at every login; it opens the Quickshell window
+# (config graphite-firstboot) until the user finishes or skips it once.
 #   graphite-firstboot [auto|open|close|status|reset]
 #   graphite-firstboot finish            mark done (the window's Finish/Skip buttons)
 #   graphite-firstboot wallpapers        bundled wallpapers, one path per line
 #   graphite-firstboot privacy [get|set KEY on|off]   news, clipboard, recent
 #   graphite-firstboot profiles          NAME=installed|available (gaming, creator, dev, nvidia)
 #   graphite-firstboot profile NAME      install graphite-NAME in a terminal (asks for sudo)
+#   graphite-firstboot kernel            zen=installed|available (opt-in linux-zen; default is linux)
+#   graphite-firstboot kernel zen        install linux-zen in a terminal (asks for sudo; GRUB Advanced options)
 #   graphite-firstboot secureboot        one-line Secure Boot summary
 set -uo pipefail
 G=$HOME/.config/graphite
@@ -95,10 +98,19 @@ case ${1:-open} in
     p=${2:?usage: graphite-firstboot profile gaming|creator|dev|nvidia}
     [[ $p =~ ^(gaming|creator|dev|nvidia)$ ]] || { echo "unknown profile: $p" >&2; exit 1; }
     setsid -f kitty --title "Graphite: install $p profile" sh -c "sudo pacman -S --needed graphite-$p; echo; read -r -p 'Press Enter to close' _" >/dev/null 2>&1 ;;
+  kernel)
+    case ${2:-status} in
+      status) if pacman -Qq linux-zen >/dev/null 2>&1; then echo "zen=installed"; else echo "zen=available"; fi ;;
+      zen)
+        # Opt-in: linux and linux-lts stay installed and remain the default; zen is added
+        # under GRUB Advanced options. graphite-perf already says this after the install.
+        setsid -f kitty --title "Graphite: install linux-zen" sh -c "sudo graphite perf kernel zen; echo; read -r -p 'Press Enter to close' _" >/dev/null 2>&1 ;;
+      *) echo "usage: graphite-firstboot kernel [status|zen]" >&2; exit 1 ;;
+    esac ;;
   secureboot)
     s=$(graphite-secureboot status 2>/dev/null)
     if grep -q 'legacy BIOS' <<<"$s"; then echo "Legacy BIOS boot: Secure Boot is not available."
     elif grep -q 'secure boot:  enabled' <<<"$s"; then echo "Secure Boot is enabled."
     else echo "Secure Boot is off. It is optional: 'graphite secureboot plan' explains the steps (docs/secure-boot.md)."; fi ;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
